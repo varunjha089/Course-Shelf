@@ -1,7 +1,7 @@
 //! Read-only view of the paper library's list (`[papers] list` in config.toml, by default Paper_Database.csv).
 //!
-//! CourseShelf never writes this file: it has unstable row numbers and other tools (the reading tracker,
-//! resync_all.py, audit.py) own it. Rows are identified by their Link, as the library's own rules say.
+//! This module only reads the file. The one place that writes it is "Add papers" (addpapers.rs), on the user's explicit request,
+//! through the library's own `add_command` when one is set. Rows are identified by their Link (row numbers are not stable).
 
 use anyhow::{Context, Result};
 use serde::Serialize;

@@ -28,6 +28,7 @@ extra_args = []                  # e.g. ["--cookies-from-browser", "chrome"]
 # library = "~/Papers"
 # list = "Paper_Database.csv"     # columns: S. No, Title, Link, Local Link, ... (see README)
 # inbox = "papers/inbox"          # downloaded papers go here, never into the library
+# add_command = ["python3", "/path/to/add_papers.py"]   # optional: the library's own tool for "Add papers" (else rows are appended)
 
 # Optional: folders of PDFs for the Books tab (to 5 levels deep). Annotations are kept in this data folder, never inside the PDF.
 # [pdf_sources]

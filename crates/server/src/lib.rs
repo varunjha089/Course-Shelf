@@ -16,7 +16,7 @@ mod collections;
 mod jobs;
 mod manage;
 
-use courseshelf_core::{config::Config, library, locations, papers, progress::Progress, spec};
+use courseshelf_core::{addpapers, config::Config, library, locations, papers, progress::Progress, spec};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -583,6 +583,137 @@ async fn api_papers(State(app): State<Shared>) -> Json<PapersOut> {
     })
 }
 
+// ---------- adding papers to the list (the only write to it; see core::addpapers) ----------
+
+#[derive(Deserialize)]
+struct LookupReq {
+    text: String,
+}
+
+#[derive(Serialize)]
+struct Existing {
+    id: String,
+    sno: u32,
+    title: String,
+}
+
+#[derive(Serialize)]
+struct Looked {
+    paper: addpapers::NewPaper,
+    /// Already in the paper list (matched on arXiv id, DOI or link): it cannot be added again.
+    existing: Option<Existing>,
+}
+
+#[derive(Serialize)]
+struct LookupOut {
+    found: Vec<Looked>,
+    not_understood: Vec<String>,
+    errors: Vec<String>,
+    /// Topics already used in the list, in the list's order (to choose from).
+    topics: Vec<String>,
+    /// How the papers will be written: the library's add_command, or None (appended to the list).
+    add_command: Option<String>,
+}
+
+fn existing_in(list: &[papers::Paper], p: &addpapers::NewPaper) -> Option<Existing> {
+    let doi = p.doi.as_ref().map(|d| d.to_ascii_lowercase());
+    list.iter()
+        .find(|x| {
+            (p.arxiv.is_some() && x.arxiv == p.arxiv) || x.link == p.link || doi.as_ref().map(|d| x.link.to_ascii_lowercase().ends_with(d.as_str())).unwrap_or(false)
+        })
+        .map(|x| Existing { id: x.id.clone(), sno: x.sno, title: x.title.clone() })
+}
+
+async fn api_papers_lookup(State(app): State<Shared>, Json(r): Json<LookupReq>) -> Response {
+    let res = tokio::task::spawn_blocking(move || -> Result<LookupOut> {
+        let pp = papers_paths(&app)?;
+        let list = load_papers_cached(&app, &pp.list_csv)?;
+        let (refs, not_understood) = addpapers::parse_refs(&r.text);
+        if refs.is_empty() {
+            return Err(anyhow!("no arXiv id, arXiv link or DOI found in the text"));
+        }
+        let (found, errors) = addpapers::lookup(&refs);
+        let mut topics: Vec<String> = vec![];
+        for p in list.iter() {
+            if !p.topic.is_empty() && !topics.contains(&p.topic) {
+                topics.push(p.topic.clone());
+            }
+        }
+        let found = found.into_iter().map(|p| Looked { existing: existing_in(&list, &p), paper: p }).collect();
+        let add_command = (!pp.add_command.is_empty()).then(|| pp.add_command.join(" "));
+        Ok(LookupOut { found, not_understood, errors, topics, add_command })
+    })
+    .await;
+    match res {
+        Ok(Ok(o)) => Json(o).into_response(),
+        Ok(Err(e)) => (StatusCode::UNPROCESSABLE_ENTITY, format!("{e:#}")).into_response(),
+        Err(e) => err500(anyhow!("{e}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct AddPapersReq {
+    papers: Vec<addpapers::NewPaper>,
+}
+
+/// Write the chosen papers into the list, as a job: through `[papers] add_command` when set, otherwise appended with a backup.
+async fn api_papers_add(State(app): State<Shared>, Json(r): Json<AddPapersReq>) -> Response {
+    let bad = |m: String| (StatusCode::UNPROCESSABLE_ENTITY, m).into_response();
+    if r.papers.is_empty() {
+        return bad("choose at least one paper".into());
+    }
+    if let Some(p) = r.papers.iter().find(|p| p.title.trim().is_empty() || p.link.trim().is_empty()) {
+        return bad(format!("a paper has no title or link ({})", p.link));
+    }
+    let pp = match papers_paths(&app) {
+        Ok(x) => x,
+        Err(e) => return bad(format!("{e:#}")),
+    };
+    if let Ok(list) = load_papers_cached(&app, &pp.list_csv) {
+        if let Some((p, e)) = r.papers.iter().find_map(|p| existing_in(&list, p).map(|e| (p, e))) {
+            return bad(format!("“{}” is already in the list (#{} {})", p.title, e.sno, e.title));
+        }
+    }
+    let n = r.papers.len() as u32;
+    let info = jobs::JobInfo { kind: "addpapers".into(), course: "papers:add".into(), title: format!("Add {n} paper{}", if n == 1 { "" } else { "s" }), total: n, ..Default::default() };
+    let a = app.clone();
+    let papers_in = r.papers;
+    let work: jobs::Work = Box::new(move |ctx| {
+        let home = a.home.clone();
+        if pp.add_command.is_empty() {
+            let backup = addpapers::append_to_list(&pp.list_csv, &papers_in, &home.join("papers").join("backups"))?;
+            ctx.log(format!("appended {} row(s) to {}; backup: {}", papers_in.len(), pp.list_csv.display(), backup.display()));
+        } else {
+            let dir = home.join("cache");
+            std::fs::create_dir_all(&dir)?;
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let json = dir.join(format!("add_papers_{stamp}.json"));
+            std::fs::write(&json, serde_json::to_vec_pretty(&papers_in)?)?;
+            ctx.log(format!("running: {} {}", pp.add_command.join(" "), json.display()));
+            let out = courseshelf_core::tools::command(&pp.add_command[0])
+                .args(&pp.add_command[1..])
+                .arg(&json)
+                .current_dir(&pp.library)
+                .output()
+                .map_err(|e| anyhow!("could not run {}: {e}", pp.add_command[0]))?;
+            for l in String::from_utf8_lossy(&out.stdout).lines().chain(String::from_utf8_lossy(&out.stderr).lines()) {
+                ctx.log(l.to_string());
+            }
+            if !out.status.success() {
+                let last: Vec<String> = String::from_utf8_lossy(&out.stderr).lines().chain(String::from_utf8_lossy(&out.stdout).lines()).filter(|l| !l.trim().is_empty()).map(String::from).collect();
+                return Err(anyhow!("the library's add command stopped: {}", last.last().cloned().unwrap_or_else(|| format!("exit code {:?}", out.status.code()))));
+            }
+            let _ = std::fs::remove_file(&json);
+        }
+        ctx.update(|i| i.done = i.total);
+        Ok(())
+    });
+    match app.jobs.submit(info, work) {
+        Ok(j) => Json(serde_json::json!({ "job": j })).into_response(),
+        Err(e) => bad(e),
+    }
+}
+
 fn is_downloadable(p: &papers::Paper) -> bool {
     p.arxiv.is_some() || ((p.link.starts_with("https://") || p.link.starts_with("http://")) && p.link.to_ascii_lowercase().ends_with(".pdf"))
 }
@@ -859,6 +990,8 @@ pub fn router(app: Shared) -> Router {
         .route("/api/papers", get(api_papers))
         .route("/api/open", post(api_open))
         .route("/api/papers/download", post(api_download))
+        .route("/api/papers/lookup", post(api_papers_lookup))
+        .route("/api/papers/add", post(api_papers_add))
         .route("/api/manage", get(manage::api_overview))
         .route("/api/manage/plan", post(manage::api_plan))
         .route("/api/manage/download", post(manage::api_download))

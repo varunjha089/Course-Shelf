@@ -8,7 +8,7 @@ folder, drives, history) and is never committed.
 
 An offline library for video courses and PDFs. Rust core + Tauri 2 window + React/TypeScript UI, for macOS (the core also builds on Linux and Windows).
 Tabs: **Courses** (watch, resume, ticks, copy to this computer), **Downloads** (yt-dlp downloads, single YouTube links, point / match / move courses, drives),
-**Papers** (optional: a read-only paper list CSV, question banks, arXiv download to the inbox, "make a book"), **Books** (PDF viewer with annotations).
+**Papers** (optional: a paper list CSV, question banks, arXiv download to the inbox, "make a book", "add papers"), **Books** (PDF viewer with annotations).
 A command-line tool, `courseshelf-fetch` (doctor, home, list, plan, run, prune, import-plans), shares the same core. App version: `app/src-tauri/tauri.conf.json`.
 
 **Program and data are separate.** This folder holds only code. Everything of a user's lives in the DATA folder (`config::default_home()`):
@@ -23,7 +23,9 @@ empty `courses.csv` there (`config::ensure_home`, which never overwrites). `cour
 - **A user's data folder is precious** (PDF annotations, joined books, bookmarks): never edit, move or delete files in it; tests use a scratch data folder.
 - **Never start a real download, and never run `courseshelf-fetch run`, unless the user presses Download or asks.** Metadata lookups (`--flat-playlist -J`) are fine.
 - **Never delete a user's videos.** A move copies, verifies, then deletes; "Remove link" only forgets a link. Ask before any delete of media.
-- **Never write the paper library** (`[papers] library` / `list`): the Papers tab is read-only; downloads go to the data folder's `papers/inbox/` only.
+- **The paper list is written in ONE place only: "Add papers"** (`core/addpapers.rs`, `POST /api/papers/add`), on the user's click, through the library's own
+  `[papers] add_command` when set (it knows the library's rules), else appended with a backup. Nothing else writes the list or any other file of the library;
+  downloads go to the data folder's `papers/inbox/` only. A duplicate (same arXiv id, DOI or link) is refused by the server before the job starts.
 - **Large, high-contrast text** (the owner wears spectacles); do not shrink fonts to fit.
 - On macOS (BSD `sed`, no `timeout`) edit files with Python or the Edit tool and assert that each replaced string matched.
 
@@ -42,11 +44,12 @@ crates/core/src/           no UI, no HTTP: everything that touches disk or tools
   locations.rs             locations.json: a course that lives outside <drive>/<course>
   progress.rs              SQLite watch progress in <drive>/.courseshelf/progress.sqlite (travels with the disk)
   papers.rs                paper list reader (columns S. No, Title, Link, Local Link, ...), arXiv inbox
+  addpapers.rs             "Add papers": parse pasted ids / DOIs, arXiv API + Crossref lookup (curl), append with a backup when there is no add_command
   tools.rs                 finds yt-dlp / ffmpeg / ffprobe / deno / pdfinfo; ALWAYS launch tools through tools::command
 crates/server/src/
   lib.rs                   axum server on 127.0.0.1 (random port), cookie token, Host check, routes, video streaming with Range
   manage.rs                Downloads-tab endpoints (overview incl. the data folder, plan, download, jobs, adopt, move, drives, browse, singles)
-  jobs.rs                  one-at-a-time job queue with live progress (kinds: download, move, single, collection)
+  jobs.rs                  one-at-a-time job queue with live progress (kinds: download, move, single, collection, addpapers)
   annot.rs                 annotations (annotations/<key>.json, key = hash of the PDF's bytes), books list, bookmarks
   collections.rs           books joined from papers (pdfunite), missing papers downloaded first, rename / reorder / delete
   main.rs                  courseshelf-serve: the server alone, for a browser or tests

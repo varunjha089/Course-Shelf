@@ -246,7 +246,7 @@ export interface ManageState {
 
 export interface Job {
   id: number;
-  kind: "download" | "move" | "single" | "collection";
+  kind: "download" | "move" | "single" | "collection" | "addpapers";
   course: string;
   drive: string;
   title: string;
@@ -378,3 +378,10 @@ export const addSingle = (url: string) => post("/api/singles/add", { url }) as P
 export const removeSingle = (id: string) => post("/api/singles/remove", { id });
 export const downloadSingle = (id: string, dest: string, create = false) => post("/api/singles/download", { id, dest, create }) as Promise<{ job: number }>;
 export const revealSingle = (id: string) => post("/api/open", { kind: "single", id, reveal: true }).catch(() => {});
+
+// ---------- adding papers to the paper list ----------
+export interface NewPaper { arxiv: string | null; doi: string | null; title: string; authors: string[]; year: string; venue: string; link: string; summary: string; topic: string; notes: string }
+export interface LookedUp { paper: NewPaper; existing: { id: string; sno: number; title: string } | null }
+export interface LookupOut { found: LookedUp[]; not_understood: string[]; errors: string[]; topics: string[]; add_command: string | null }
+export const lookupPapers = (text: string) => post("/api/papers/lookup", { text }) as Promise<LookupOut>;
+export const addPapers = (papers: NewPaper[]) => post("/api/papers/add", { papers }) as Promise<{ job: number }>;

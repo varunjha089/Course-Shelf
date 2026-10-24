@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Single, addSingle, downloadSingle, getSingles, removeSingle, revealSingle, BrowseOut, Course, DEFAULT_SETTINGS, MacInfo, macCopy, macRemove, DlPlan, DriveOut, Job, ManageCourse, ManageState, setDrive, MovePlan, Proposal, adoptApply, adoptPreview, browse, cancelJob, clearLocation, getJobs, getManage, planDownload, planMove, setLocation, startDownload, startMove, Lecture, Paper, PapersState, Settings, State, bankPdfUrl, bookPdfUrl, BooksOut, getBooks, setBookmark, Collection, getCollections, createCollection, addToCollection, renameCollection, reorderCollection, deleteCollection, collectionPdfUrl, openCollection, openBook, downloadPaper, getPapers, inboxPdfUrl, openBank, openExternal, openInbox, openPaper, paperPdfUrl, fmtBytes, fmtHours, fmtTime, getSettings, getState, getSubs, mediaUrl, saveProgress, saveSettings, setDone, setSpeed } from "./api";
+import { Single, addSingle, downloadSingle, getSingles, removeSingle, revealSingle, BrowseOut, Course, DEFAULT_SETTINGS, MacInfo, macCopy, macRemove, DlPlan, DriveOut, Job, ManageCourse, ManageState, setDrive, MovePlan, Proposal, adoptApply, adoptPreview, browse, cancelJob, clearLocation, getJobs, getManage, planDownload, planMove, setLocation, startDownload, startMove, Lecture, Paper, PapersState, Settings, State, bankPdfUrl, bookPdfUrl, BooksOut, getBooks, setBookmark, Collection, getCollections, createCollection, addToCollection, renameCollection, reorderCollection, deleteCollection, collectionPdfUrl, openCollection, openBook, downloadPaper, getPapers, inboxPdfUrl, openBank, openExternal, openInbox, openPaper, paperPdfUrl, fmtBytes, fmtHours, fmtTime, getSettings, getState, getSubs, mediaUrl, saveProgress, saveSettings, setDone, setSpeed, LookedUp, LookupOut, NewPaper, addPapers, lookupPapers } from "./api";
 import { PdfAnnotator } from "./pdfview";
 
 // ---------- tiny hash router: #/  #/c/<drive>/<course>  #/p/<drive>/<course>/<file> ----------
@@ -651,6 +651,7 @@ function PapersPage() {
   const [shown, setShown] = useState(PAGE);
   const [open, setOpen] = useState<string | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
   const toggleSel = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const load = useCallback(() => {
@@ -726,8 +727,10 @@ function PapersPage() {
           {(Object.keys(STATUS_LABEL) as StatusFilter[]).map((k) => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
         </select>
         <button className="btn" onClick={load} title="Re-read the paper list">Reload</button>
+        <button className="btn primary" onClick={() => setAdding(!adding)} aria-expanded={adding}>{adding ? "Close" : "Add papers"}</button>
       </div>
-      <p className="muted small">{filtered.length} of {papers.length} shown · read-only view of the paper list (<code>[papers]</code> in <code>config.toml</code>); CourseShelf never edits it.</p>
+      {adding && <AddPapers onAdded={load} onClose={() => setAdding(false)} />}
+      <p className="muted small">{filtered.length} of {papers.length} shown · the paper list (<code>[papers]</code> in <code>config.toml</code>); CourseShelf changes it only through <b>Add papers</b>.</p>
 
       <div className="controls">
         <button className="btn sm" onClick={() => setSel(new Set([...sel, ...filtered.map((p) => p.id)]))} disabled={filtered.length === 0} title="Tick every paper that matches the search and filters">Select all {filtered.length} shown</button>
@@ -748,6 +751,92 @@ function PapersPage() {
         <p style={{ textAlign: "center" }}><button className="btn" onClick={() => setShown(shown + PAGE)}>Show {Math.min(PAGE, filtered.length - shown)} more</button></p>
       )}
     </>
+  );
+}
+
+/** Paste arXiv ids / links / DOIs, look them up, choose a topic and a note for each, and add them to the paper list (as a job). */
+function AddPapers({ onAdded, onClose }: { onAdded: () => void; onClose: () => void }) {
+  const [text, setText] = useState("");
+  const [res, setRes] = useState<LookupOut | null>(null);
+  const [rows, setRows] = useState<(NewPaper & { pick: boolean; existing: LookedUp["existing"] })[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [job, setJob] = useState<Job | null>(null);
+  const running = job && (job.status === "running" || job.status === "queued");
+  const note = (p: NewPaper) => {
+    const who = p.authors.length ? `${p.authors[0].split(" ").slice(-1)[0]}${p.authors.length > 1 ? " et al." : ""}` : "";
+    return [who && p.year ? `${who}, ${p.year}` : who || p.year, p.venue].filter(Boolean).join(". ") + (who || p.year || p.venue ? ". " : "");
+  };
+  const look = async () => {
+    setErr(null); setBusy(true); setJob(null);
+    try {
+      const r = await lookupPapers(text);
+      setRes(r);
+      setRows(r.found.map((f) => ({ ...f.paper, topic: "", notes: note(f.paper), pick: !f.existing, existing: f.existing })));
+    } catch (e) { setErr(String((e as Error).message ?? e)); setRes(null); } finally { setBusy(false); }
+  };
+  useEffect(() => {
+    if (!job || !(job.status === "running" || job.status === "queued")) return;
+    const t = setInterval(() => getJobs().then((l) => { const j = l.find((x) => x.id === job.id); if (j) { setJob(j); if (j.status !== "running" && j.status !== "queued") onAdded(); } }).catch(() => {}), 1000);
+    return () => clearInterval(t);
+  }, [job?.id, job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chosen = rows.filter((r) => r.pick && !r.existing);
+  const add = async () => {
+    setErr(null); setBusy(true);
+    try {
+      const r = await addPapers(chosen.map(({ pick: _p, existing: _e, ...p }) => p)); // eslint-disable-line @typescript-eslint/no-unused-vars
+      const l = await getJobs();
+      setJob(l.find((x) => x.id === r.job) ?? null);
+    } catch (e) { setErr(String((e as Error).message ?? e)); } finally { setBusy(false); }
+  };
+  const set = (i: number, patch: Partial<NewPaper & { pick: boolean }>) => setRows(rows.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  return (
+    <div className="mcourse">
+      <b>Add papers to the list</b>
+      <p className="small muted" style={{ margin: ".3rem 0" }}>Paste arXiv ids or links (2307.03172, arxiv.org/abs/…, arxiv.org/pdf/…) or DOIs (10.1038/…, doi.org/…), any separator.
+        They are looked up on arXiv / Crossref; papers already in the list are marked and cannot be added twice. Nothing is written until you press Add.</p>
+      <textarea className="search" style={{ width: "100%", minHeight: "5.5rem", fontFamily: "inherit" }} value={text} onChange={(e) => setText(e.target.value)} placeholder="https://arxiv.org/abs/2307.03172&#10;2404.16130&#10;10.1038/323533a0" aria-label="Papers to add" disabled={!!running} />
+      <div className="controls">
+        <button className="btn primary" onClick={look} disabled={busy || !!running || !text.trim()}>{busy && !rows.length ? "Looking up…" : "Look up"}</button>
+        <button className="btn sm" onClick={onClose} disabled={!!running}>Close</button>
+      </div>
+      {err && <div className="err">{err}</div>}
+      {res && (res.errors.length > 0 || res.not_understood.length > 0) && (
+        <div className="small" style={{ color: "var(--warn)" }}>
+          {res.errors.map((e) => <div key={e}>{e}</div>)}
+          {res.not_understood.length > 0 && <div>Not an arXiv id or DOI: {res.not_understood.join(", ")}</div>}
+        </div>
+      )}
+      {rows.length > 0 && (
+        <>
+          <datalist id="addpaper-topics">{(res?.topics ?? []).map((t) => <option key={t} value={t} />)}</datalist>
+          <table className="lec papers">
+            <thead><tr><th aria-label="Add"></th><th style={{ width: "48%" }}>Paper</th><th>Topic</th><th>Note</th></tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.link}>
+                  <td><input type="checkbox" checked={r.pick && !r.existing} disabled={!!r.existing || !!running} onChange={(e) => set(i, { pick: e.target.checked })} aria-label={`Add ${r.title}`} /></td>
+                  <td>
+                    <b>{r.title}</b>
+                    <div className="small muted">{r.authors.slice(0, 4).join(", ")}{r.authors.length > 4 ? " et al." : ""}{r.year ? ` · ${r.year}` : ""}{r.venue ? ` · ${r.venue}` : ""} · <a href={r.link} onClick={(e) => { e.preventDefault(); openExternal(r.link); }}>{r.arxiv ?? r.doi}</a></div>
+                    {r.existing && <div className="small"><span className="badge ok">already in the list</span> #{r.existing.sno} {r.existing.title}</div>}
+                  </td>
+                  {r.existing ? <td colSpan={2} className="small muted">not added again</td> : <>
+                    <td><input className="search" list="addpaper-topics" value={r.topic} onChange={(e) => set(i, { topic: e.target.value })} placeholder={res?.add_command ? "empty: the library decides" : "topic"} disabled={!!running} aria-label="Topic" style={{ width: "100%", minWidth: "9rem" }} /></td>
+                    <td><textarea className="search" value={r.notes} onChange={(e) => set(i, { notes: e.target.value })} disabled={!!running} aria-label="Note" rows={3} style={{ width: "100%", minWidth: "10rem", fontFamily: "inherit" }} /></td>
+                  </>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="controls">
+            <button className="btn primary" onClick={add} disabled={busy || !!running || chosen.length === 0}>Add {chosen.length} paper{chosen.length === 1 ? "" : "s"}</button>
+            <span className="small muted">{res?.add_command ? <>Written by the library's own tool: <code style={{ wordBreak: "break-all" }}>{res.add_command}</code></> : <>Appended to the end of the list; a backup copy is made first (data folder, <code>papers/backups/</code>).</>}</span>
+          </div>
+        </>
+      )}
+      {job && <JobCard j={job} onCancel={() => {}} />}
+    </div>
   );
 }
 
@@ -1030,7 +1119,7 @@ function JobCard({ j, onCancel }: { j: Job; onCancel: (id: number) => void }) {
   return (
     <div className={`job ${j.status}`}>
       <div className="jobhead">
-        <b>{j.kind === "download" ? "Download" : j.kind === "single" ? "Video" : j.kind === "collection" ? "Book" : "Move"}: {j.title}</b>
+        <b>{j.kind === "download" ? "Download" : j.kind === "single" ? "Video" : j.kind === "collection" ? "Book" : j.kind === "addpapers" ? "Papers" : "Move"}: {j.title}</b>
         <span className={`badge ${j.status === "done" ? "ok" : j.status === "failed" ? "bad" : j.status === "cancelled" ? "" : "info"}`}>{j.status}</span>
         <span className="spacer" />
         {active && <button className="btn sm" onClick={() => onCancel(j.id)}>Cancel</button>}
@@ -1038,7 +1127,7 @@ function JobCard({ j, onCancel }: { j: Job; onCancel: (id: number) => void }) {
       </div>
       <div className="bar resume" aria-label="progress"><i style={{ width: `${Math.min(100, overall)}%` }} /></div>
       <div className="muted small">
-        {j.kind !== "move" ? `${j.done} of ${j.total} ${j.kind === "single" ? "video" : j.kind === "collection" ? "paper" : "lecture"}${j.total === 1 ? "" : "s"} verified` : `${fmtGB(j.bytes_done)} of ${fmtGB(j.bytes_total)}`}
+        {j.kind !== "move" ? `${j.done} of ${j.total} ${j.kind === "single" ? "video" : j.kind === "collection" || j.kind === "addpapers" ? "paper" : "lecture"}${j.total === 1 ? "" : "s"} ${j.kind === "addpapers" ? "added" : "verified"}` : `${fmtGB(j.bytes_done)} of ${fmtGB(j.bytes_total)}`}
         {j.status === "running" && j.kind !== "move" && (j.current_index > 0 || j.percent > 0) && <> {j.kind === "single" ? (j.total > 1 ? ` · video ${j.current_index}` : "") : ` · lecture ${j.current_index}`}{j.current_title ? `: ${j.current_title}` : ""} · {j.percent.toFixed(0)}%{j.speed ? ` · ${j.speed}` : ""}{j.eta ? ` · ${j.eta} left` : ""}</>}
         {j.status === "running" && j.kind === "move" && j.current_title && <> · {j.current_title}</>}
       </div>

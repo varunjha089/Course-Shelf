@@ -1,3 +1,4 @@
+pub mod addpapers;
 pub mod adopt;
 pub mod config;
 pub mod fetcher;

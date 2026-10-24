@@ -45,6 +45,10 @@ pub struct PapersCfg {
     pub banks_dir: Option<String>,
     pub inbox: Option<String>,
     pub banks: Option<String>,
+    /// The library's own tool for adding papers (program and arguments); it gets a JSON file of new papers as its last argument.
+    /// Without it, "Add papers" appends rows to the end of the list (after a backup).
+    #[serde(default)]
+    pub add_command: Vec<String>,
 }
 
 /// Extra folders of PDFs (books, a downloaded paper pile) the Books tab lists and the PDF viewer can annotate.
@@ -90,6 +94,8 @@ pub struct PapersPaths {
     pub banks_dir: PathBuf,
     pub inbox: PathBuf,
     pub banks_csv: PathBuf,
+    /// `[papers] add_command` (empty: append to the list).
+    pub add_command: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -181,6 +187,7 @@ extra_args = []                  # e.g. ["--cookies-from-browser", "chrome"]
 # library = "~/Papers"
 # list = "Paper_Database.csv"     # columns: S. No, Title, Link, Local Link, ... (see README)
 # inbox = "papers/inbox"          # downloaded papers go here, never into the library
+# add_command = ["python3", "/path/to/add_papers.py"]   # optional: the library's own tool for "Add papers" (else rows are appended)
 
 # Optional: folders of PDFs for the Books tab (to 5 levels deep). Annotations are kept in this data folder, never inside the PDF.
 # [pdf_sources]
@@ -237,6 +244,7 @@ impl Config {
                 library,
                 inbox: rel(p.inbox.as_deref().unwrap_or("papers/inbox")),
                 banks_csv: rel(p.banks.as_deref().unwrap_or("papers/banks.csv")),
+                add_command: p.add_command.clone(),
             }
         });
         let pdf_folders = raw.pdf_sources.unwrap_or_default().folders.iter().map(|f| { let x = expand_home(f); if x.is_absolute() { x } else { home.join(x) } }).collect();
