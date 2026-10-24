@@ -1,0 +1,3 @@
+course,playlist_url,items,priority,drive,quality_cap,enabled,note
+MIT/18.01_Single_Variable_Calculus,https://www.youtube.com/playlist?list=PL590CCC2BC5AF3BC1,1-10,10,local,720,yes,first ten lectures at most 720p
+MIT/18.02_Multivariable_Calculus,https://www.youtube.com/playlist?list=PL4C4C8A7D06566F38,"all-3,5",20,local,,no,"everything except lectures 3 and 5; enabled = no: skipped by run"

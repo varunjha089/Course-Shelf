@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/server", "crates/fetch", "app/src-tauri"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"

@@ -1,0 +1,21 @@
+[package]
+name = "courseshelf-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = "0.8.9"
+courseshelf-core = { version = "0.1.0", path = "../core" }
+http = "1.5.0"
+mime_guess = "2.0.5"
+rust-embed = "8.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "net", "macros", "sync"] }
+tower = "0.5.3"
+tower-http = { version = "0.7.1", features = ["fs"] }
+
+[[bin]]
+name = "courseshelf-serve"
+path = "src/main.rs"

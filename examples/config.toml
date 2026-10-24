@@ -1,0 +1,34 @@
+# CourseShelf configuration (an example; the app writes one like it on first start).
+# Each drive is a folder that holds course folders (and a hidden .courseshelf/ folder with your watch progress).
+
+courses_csv = "courses.csv"
+
+# The drive that is this computer, and how much course video may be kept on it in total.
+[mac]
+drive = "local"
+max_gb = 50
+
+[drives.local]
+path = "~/CourseShelf Courses"
+
+# An external disk (remove the # to use it). budget_gb keeps CourseShelf from filling it.
+# [drives.hdd]
+# path = "/Volumes/MyDisk/Courses"
+# budget_gb = 200
+
+[ytdlp]
+sleep_min = 3                    # seconds to wait between videos, so YouTube does not throttle you
+sleep_max = 10
+subtitle_langs = "en,-live_chat"
+est_gb_per_hour = 1.3            # only used by `plan` for its size estimate
+extra_args = []                  # e.g. ["--cookies-from-browser", "chrome"]
+
+# Optional: a paper library for the Papers tab (a folder with a paper list CSV). Read-only: CourseShelf never edits it.
+# [papers]
+# library = "~/Papers"
+# list = "Paper_Database.csv"     # columns: S. No, Title, Link, Local Link, ... (see README)
+# inbox = "papers/inbox"          # downloaded papers go here, never into the library
+
+# Optional: folders of PDFs for the Books tab (to 5 levels deep). Annotations are kept in this data folder, never inside the PDF.
+# [pdf_sources]
+# folders = ["~/Documents/Books"]

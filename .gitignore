@@ -1,0 +1,24 @@
+target/
+node_modules/
+web/dist/
+app/src-tauri/target/
+*.log
+.DS_Store
+
+# user data never lives in the program folder (it is in the data folder, see README), but if a test or an old setup leaves some here, keep it out of git
+/cache/
+/papers/
+/Backup/
+/annotations/
+/collections/
+/collections.json
+/bookmarks.json
+/singles.json
+/ui-settings.json
+/locations.json
+/config.toml
+/courses.csv
+/plans/
+
+# the owner's own notes (personal paths, history): never committed
+*.local.md
