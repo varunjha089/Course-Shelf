@@ -140,6 +140,6 @@ An unplugged disk shows "not connected"; never create folders on a missing disk 
 ## Git and releases
 
 - This folder is the repository (`main`, remote `origin`). Commit after every checked change with a message that says what and why (attribution lines of the session
-  at the end). Push only when the owner asks; push `main` only; never rewrite pushed history. Scan new commits for personal paths and data before a push.
+  at the end). Push to `origin` after every change that is verified (tests pass, the new commits scanned clean): the owner asked for this on 2026-10-24; push `main` only; never rewrite pushed history. Scan new commits for personal paths and data before a push.
 - Tracked: `crates/`, `app/` (without `node_modules`), `web/src`, `web/public`, `examples/`, README, CLAUDE.md, LICENSE. Never: build output, `node_modules`, user data, `*.local.md`.
 - A release: raise `version` in `app/src-tauri/tauri.conf.json`, describe it in `README.md`, run the fresh-clone test, commit, tag `vX.Y.Z`.
