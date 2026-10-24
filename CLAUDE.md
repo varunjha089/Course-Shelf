@@ -93,6 +93,20 @@ once, then call the API with `-b jar`. Headless Chrome (`--headless=new --virtua
 A Finder launch: `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin <app>/Contents/MacOS/courseshelf-app` with `COURSESHELF_URL_FILE=<file>` (the app writes its address there).
 Before sharing a version: a fresh clone, `npm install`, the build and `cargo test`, and a first start with a scratch `HOME`.
 
+## Making a book from a list of papers (scripted)
+
+What the Papers tab's "Make a book" does, for a list given in chat (only when the user asks for that book; it writes to their data folder):
+1. **IDs.** A database paper has a 10-hex id (`GET /api/papers` -> `papers[].id`; match on `arxiv`, never on `sno`). A PDF from a `[pdf_sources]` folder has
+   a 16-hex id (`GET /api/books` -> `books[].id`). A book may mix both, in any order.
+2. **A cover or contents page first**: typeset it (e.g. pdflatex) into a folder listed in `[pdf_sources]` and put its 16-hex id first. Its title in the book
+   comes from the file name (leading digits and `_` stripped), so name it `00_<Title_Words>.pdf`. To add such a folder, back up `config.toml` first and add one line.
+3. **Create**: `POST /api/collections/create {"title": ..., "paper_ids": [...]}` -> `{"job": N}` (422 with a plain message if the title exists, the list is empty or another job is running).
+   Papers that are not on disk are downloaded to `papers/inbox/` (3 s apart). `POST /api/collections/add {"id", "paper_ids"}` appends to an existing book.
+4. **Wait**: `GET /api/manage/jobs` returns `{"jobs": [...]}` (a dict, not a list); poll until the job's `status` is `done`, `failed` or `cancelled`, then read its `warnings`.
+5. **Check** `collections.json` (each paper's `start` and `pages`) and `pdfinfo collections/<id>.pdf`: the page count must equal the last start + pages - 1.
+A separate `courseshelf-serve` on the same data folder works while the app is open (the app re-reads `collections.json` and `config.toml` on each request), but the
+book lock is per process: do not let the user make a book in the app at the same moment. Stop the server afterwards.
+
 ## Things that went wrong before (do not repeat)
 
 - **"yt-dlp was not found" from Finder**: a Finder-launched app gets launchd's bare PATH. `tools.rs` also searches `/opt/homebrew/bin`, `/usr/local/bin`,
