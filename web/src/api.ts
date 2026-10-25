@@ -186,6 +186,8 @@ export interface PapersState {
   available: boolean;
   error: string | null;
   library: string;
+  list: string;
+  starter: boolean;
   papers: Paper[];
 }
 

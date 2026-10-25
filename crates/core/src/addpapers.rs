@@ -231,6 +231,21 @@ pub fn lookup(refs: &[Ref]) -> (Vec<NewPaper>, Vec<String>) {
 /// Append the papers to the end of a CSV paper list (the case without add_command). Columns are filled by name when the list has
 /// them: S. No (largest + 1), Title, Link, Notes, DL_Topic, Local Link ("not in library"). A backup copy is made first.
 /// Returns the backup's path.
+/// The column headings of a new starter list (the columns "Add papers" fills, read back by `papers::load`).
+pub const STARTER_LIST_HEADER: &str = "S. No,Title,DL_Topic,Link,Local Link,Notes\n";
+
+/// Make an empty starter list (headings only) when there is none yet. Only for `PapersPaths::starter`, never for a configured library.
+pub fn start_list(list_csv: &Path) -> Result<bool> {
+    if list_csv.exists() {
+        return Ok(false);
+    }
+    if let Some(dir) = list_csv.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(list_csv, STARTER_LIST_HEADER).with_context(|| format!("cannot write {}", list_csv.display()))?;
+    Ok(true)
+}
+
 pub fn append_to_list(list_csv: &Path, papers: &[NewPaper], backup_dir: &Path) -> Result<PathBuf> {
     if papers.is_empty() {
         bail!("no paper to add");
@@ -339,6 +354,21 @@ mod tests {
         assert_eq!((p.title.as_str(), p.year.as_str(), p.venue.as_str()), ("Learning representations by back-propagating errors", "1986", "Nature"));
         assert_eq!(p.authors, vec!["David E. Rumelhart"]);
         assert_eq!(p.link, "https://doi.org/10.1038/323533a0");
+    }
+
+    #[test]
+    fn a_starter_list_is_made_once_then_appended_to() {
+        let d = std::env::temp_dir().join(format!("cs_starter_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let list = d.join("papers").join("papers.csv");
+        assert!(start_list(&list).unwrap());
+        assert!(crate::papers::load(&list).unwrap().is_empty());
+        let p = NewPaper { title: "A paper".into(), link: "https://arxiv.org/abs/2307.03172".into(), topic: "T".into(), ..Default::default() };
+        append_to_list(&list, &[p], &d.join("backups")).unwrap();
+        assert!(!start_list(&list).unwrap(), "an existing list is never replaced");
+        let got = crate::papers::load(&list).unwrap();
+        assert_eq!((got.len(), got[0].sno, got[0].title.as_str(), got[0].topic.as_str(), got[0].arxiv.as_deref()), (1, 1, "A paper", "T", Some("2307.03172")));
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

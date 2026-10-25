@@ -109,7 +109,7 @@ fn paper_title(app: &App, id: &str) -> String {
     }
     papers_paths(app)
         .ok()
-        .and_then(|pp| crate::load_papers_cached(app, &pp.list_csv).ok())
+        .and_then(|pp| crate::load_list(app, &pp).ok())
         .and_then(|l| l.iter().find(|p| p.id == id).map(|p| p.title.clone()))
         .unwrap_or_else(|| id.to_string())
 }

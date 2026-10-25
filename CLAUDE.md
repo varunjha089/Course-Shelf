@@ -8,7 +8,8 @@ folder, drives, history) and is never committed.
 
 An offline library for video courses and PDFs. Rust core + Tauri 2 window + React/TypeScript UI, for macOS (the core also builds on Linux and Windows).
 Tabs: **Courses** (watch, resume, ticks, copy to this computer), **Downloads** (yt-dlp downloads, single YouTube links, point / match / move courses, drives),
-**Papers** (optional: a paper list CSV, question banks, arXiv download to the inbox, "make a book", "add papers"), **Books** (PDF viewer with annotations).
+**Papers** (a paper list CSV: your own library through `[papers]`, else a starter list in the data folder; question banks, arXiv download to the inbox,
+"make a book", "add papers"), **Books** (PDF viewer with annotations).
 A command-line tool, `courseshelf-fetch` (doctor, home, list, plan, run, prune, import-plans), shares the same core. App version: `app/src-tauri/tauri.conf.json`.
 
 **Program and data are separate.** This folder holds only code. Everything of a user's lives in the DATA folder (`config::default_home()`):
@@ -26,6 +27,10 @@ empty `courses.csv` there (`config::ensure_home`, which never overwrites). `cour
 - **The paper list is written in ONE place only: "Add papers"** (`core/addpapers.rs`, `POST /api/papers/add`), on the user's click, through the library's own
   `[papers] add_command` when set (it knows the library's rules), else appended with a backup. Nothing else writes the list or any other file of the library;
   downloads go to the data folder's `papers/inbox/` only. A duplicate (same arXiv id, DOI or link) is refused by the server before the job starts.
+  Without a `[papers]` section the Papers tab uses the **starter list** `<data folder>/papers/papers.csv` (`PapersPaths::starter`, `starter: true`): it reads as
+  empty until the first "Add papers" makes it (`addpapers::start_list`, headings `S. No,Title,DL_Topic,Link,Local Link,Notes`). Only the starter list is ever
+  created; a configured library or list that is missing stays an error (server `load_list`). Keep the `Paper_Database.csv` default for `[papers]`: existing
+  configs rely on it.
 - **Large, high-contrast text** (the owner wears spectacles); do not shrink fonts to fit.
 - On macOS (BSD `sed`, no `timeout`) edit files with Python or the Edit tool and assert that each replaced string matched.
 
@@ -35,7 +40,7 @@ empty `courses.csv` there (`config::ensure_home`, which never overwrites). `cour
 Cargo.toml                 workspace: crates/core, crates/server, crates/fetch, app/src-tauri
 crates/core/src/           no UI, no HTTP: everything that touches disk or tools (with unit tests)
   config.rs                config.toml (drives, [mac], [ytdlp], [papers] library/list/banks_dir/inbox, [pdf_sources]); settings_dir, default_home,
-                           home_pointer, ensure_home + STARTER_CONFIG; in-place edit of a drive's path
+                           home_pointer, ensure_home + STARTER_CONFIG; PapersPaths::starter (no [papers]); in-place edit of a drive's path
   spec.rs, items.rs        courses.csv rows and the `items` syntax (all, 1-5,8, all-2,15)
   library.rs               folder scan: "NNN - Title.mp4" lectures, partial files; a course = a folder with videos, up to 3 levels under a drive
   fetcher.rs               yt-dlp: playlist listing (cached 6 h in cache/), download_course, verify_file (ffprobe length + codec)
@@ -44,7 +49,8 @@ crates/core/src/           no UI, no HTTP: everything that touches disk or tools
   locations.rs             locations.json: a course that lives outside <drive>/<course>
   progress.rs              SQLite watch progress in <drive>/.courseshelf/progress.sqlite (travels with the disk)
   papers.rs                paper list reader (columns S. No, Title, Link, Local Link, ...), arXiv inbox
-  addpapers.rs             "Add papers": parse pasted ids / DOIs, arXiv API + Crossref lookup (curl), append with a backup when there is no add_command
+  addpapers.rs             "Add papers": parse pasted ids / DOIs, arXiv API + Crossref lookup (curl), append with a backup when there is no add_command;
+                           start_list makes the starter list
   tools.rs                 finds yt-dlp / ffmpeg / ffprobe / deno / pdfinfo; ALWAYS launch tools through tools::command
 crates/server/src/
   lib.rs                   axum server on 127.0.0.1 (random port), cookie token, Host check, routes, video streaming with Range
@@ -133,6 +139,7 @@ book lock is per process: do not let the user make a book in the app at the same
 | `collections.json`, `collections/<id>.pdf` | app | books joined from papers; their marks in `annotations/<id>.json` |
 | `bookmarks.json` | app | Books-tab bookmarks (full PDF paths) |
 | `annotations/`, `papers/inbox/`, `cache/` | app | PDF marks, downloaded papers, playlist listings |
+| `papers/papers.csv`, `papers/backups/` | app (Add papers) | the starter paper list (only without `[papers]`) and the backups made before each append |
 | `<drive>/.courseshelf/progress.sqlite` | app | watch progress, travels with the disk |
 
 An unplugged disk shows "not connected"; never create folders on a missing disk (the folder browser refuses when the parent does not exist).

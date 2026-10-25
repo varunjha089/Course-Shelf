@@ -532,6 +532,9 @@ struct PapersOut {
     available: bool,
     error: Option<String>,
     library: String,
+    /// The paper list file, and whether it is the starter list in the data folder (no `[papers]` section).
+    list: String,
+    starter: bool,
     papers: Vec<PaperOut>,
 }
 
@@ -548,14 +551,23 @@ fn load_papers_cached(app: &App, db: &Path) -> Result<Arc<Vec<papers::Paper>>> {
     Ok(list)
 }
 
+/// The `[papers]` library, or (no such section) the starter list in the data folder, so "Add papers" works on a fresh install.
 fn papers_paths(app: &App) -> Result<courseshelf_core::config::PapersPaths> {
-    Config::load(&app.home)?.papers.ok_or_else(|| anyhow!("config.toml has no [papers] section"))
+    Ok(Config::load(&app.home)?.papers.unwrap_or_else(|| courseshelf_core::config::PapersPaths::starter(&app.home)))
+}
+
+/// The paper list; a starter list that "Add papers" has not made yet is an empty list (a configured list that is missing is an error).
+pub(crate) fn load_list(app: &App, pp: &courseshelf_core::config::PapersPaths) -> Result<Arc<Vec<papers::Paper>>> {
+    if pp.starter && !pp.list_csv.exists() {
+        return Ok(Arc::new(vec![]));
+    }
+    load_papers_cached(app, &pp.list_csv)
 }
 
 async fn api_papers(State(app): State<Shared>) -> Json<PapersOut> {
     let r = tokio::task::spawn_blocking(move || -> Result<PapersOut> {
         let pp = papers_paths(&app)?;
-        let list = load_papers_cached(&app, &pp.list_csv)?;
+        let list = load_list(&app, &pp)?;
         let banks = papers::load_banks(&pp.banks_csv);
         let inbox: std::collections::HashMap<String, papers::InboxRec> =
             papers::load_inbox(&pp.inbox).into_iter().filter(|r| pp.inbox.join(&r.file).is_file()).map(|r| (r.id.clone(), r)).collect();
@@ -573,13 +585,20 @@ async fn api_papers(State(app): State<Shared>) -> Json<PapersOut> {
                 }
             })
             .collect();
-        Ok(PapersOut { available: true, error: None, library: pp.library.to_string_lossy().to_string(), papers: out })
+        Ok(PapersOut {
+            available: true,
+            error: None,
+            library: pp.library.to_string_lossy().to_string(),
+            list: pp.list_csv.to_string_lossy().to_string(),
+            starter: pp.starter,
+            papers: out,
+        })
     })
     .await;
     Json(match r {
         Ok(Ok(o)) => o,
-        Ok(Err(e)) => PapersOut { available: false, error: Some(format!("{e:#}")), library: String::new(), papers: vec![] },
-        Err(e) => PapersOut { available: false, error: Some(format!("internal error: {e}")), library: String::new(), papers: vec![] },
+        Ok(Err(e)) => PapersOut { available: false, error: Some(format!("{e:#}")), library: String::new(), list: String::new(), starter: false, papers: vec![] },
+        Err(e) => PapersOut { available: false, error: Some(format!("internal error: {e}")), library: String::new(), list: String::new(), starter: false, papers: vec![] },
     })
 }
 
@@ -627,7 +646,7 @@ fn existing_in(list: &[papers::Paper], p: &addpapers::NewPaper) -> Option<Existi
 async fn api_papers_lookup(State(app): State<Shared>, Json(r): Json<LookupReq>) -> Response {
     let res = tokio::task::spawn_blocking(move || -> Result<LookupOut> {
         let pp = papers_paths(&app)?;
-        let list = load_papers_cached(&app, &pp.list_csv)?;
+        let list = load_list(&app, &pp)?;
         let (refs, not_understood) = addpapers::parse_refs(&r.text);
         if refs.is_empty() {
             return Err(anyhow!("no arXiv id, arXiv link or DOI found in the text"));
@@ -669,7 +688,7 @@ async fn api_papers_add(State(app): State<Shared>, Json(r): Json<AddPapersReq>) 
         Ok(x) => x,
         Err(e) => return bad(format!("{e:#}")),
     };
-    if let Ok(list) = load_papers_cached(&app, &pp.list_csv) {
+    if let Ok(list) = load_list(&app, &pp) {
         if let Some((p, e)) = r.papers.iter().find_map(|p| existing_in(&list, p).map(|e| (p, e))) {
             return bad(format!("“{}” is already in the list (#{} {})", p.title, e.sno, e.title));
         }
@@ -681,6 +700,9 @@ async fn api_papers_add(State(app): State<Shared>, Json(r): Json<AddPapersReq>) 
     let work: jobs::Work = Box::new(move |ctx| {
         let home = a.home.clone();
         if pp.add_command.is_empty() {
+            if pp.starter && addpapers::start_list(&pp.list_csv)? {
+                ctx.log(format!("started a new paper list: {}", pp.list_csv.display()));
+            }
             let backup = addpapers::append_to_list(&pp.list_csv, &papers_in, &home.join("papers").join("backups"))?;
             ctx.log(format!("appended {} row(s) to {}; backup: {}", papers_in.len(), pp.list_csv.display(), backup.display()));
         } else {
@@ -735,7 +757,7 @@ fn pdf_pages(path: &Path) -> u32 {
 /// Fetch one paper into the inbox with curl. Only arXiv and direct .pdf links; the file must verify as a PDF.
 fn download_blocking(app: &App, id: &str) -> Result<papers::InboxRec> {
     let pp = papers_paths(app)?;
-    let list = load_papers_cached(app, &pp.list_csv)?;
+    let list = load_list(app, &pp)?;
     let p = list.iter().find(|p| p.id == id).ok_or_else(|| anyhow!("unknown paper"))?;
     if p.local_path.as_ref().map(|x| x.is_file()).unwrap_or(false) {
         return Err(anyhow!("this paper is already in the library"));
@@ -822,7 +844,7 @@ async fn pdf_inbox(State(app): State<Shared>, AxPath(id): AxPath<String>, req: R
 /// The local PDF of a paper, only if it really sits inside the paper library (symlinks into Teaching/ resolve there).
 fn paper_file(app: &App, id: &str) -> Option<PathBuf> {
     let pp = papers_paths(app).ok()?;
-    let list = load_papers_cached(app, &pp.list_csv).ok()?;
+    let list = load_list(app, &pp).ok()?;
     let p = list.iter().find(|p| p.id == id)?;
     let canon = p.local_path.as_ref()?.canonicalize().ok()?;
     let root = pp.library.canonicalize().ok()?;

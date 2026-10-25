@@ -730,7 +730,9 @@ function PapersPage() {
         <button className="btn primary" onClick={() => setAdding(!adding)} aria-expanded={adding}>{adding ? "Close" : "Add papers"}</button>
       </div>
       {adding && <AddPapers onAdded={load} onClose={() => setAdding(false)} />}
-      <p className="muted small">{filtered.length} of {papers.length} shown · the paper list (<code>[papers]</code> in <code>config.toml</code>); CourseShelf changes it only through <b>Add papers</b>.</p>
+      {data.starter
+        ? <p className="muted small">{filtered.length} of {papers.length} shown · your paper list is kept in this computer's CourseShelf data folder (<code>{data.list}</code>). To use a paper library of your own instead, add a <code>[papers]</code> section to <code>config.toml</code>.</p>
+        : <p className="muted small">{filtered.length} of {papers.length} shown · the paper list (<code>[papers]</code> in <code>config.toml</code>); CourseShelf changes it only through <b>Add papers</b>.</p>}
 
       <div className="controls">
         <button className="btn sm" onClick={() => setSel(new Set([...sel, ...filtered.map((p) => p.id)]))} disabled={filtered.length === 0} title="Tick every paper that matches the search and filters">Select all {filtered.length} shown</button>
@@ -739,7 +741,8 @@ function PapersPage() {
       </div>
       {sel.size > 0 && <BookBuilder papers={papers} sel={sel} defaultTitle={q.trim()} onDone={() => { load(); }} onClear={() => setSel(new Set())} />}
 
-      {filtered.length === 0 ? <div className="empty">No paper matches these filters.</div> : (
+      {papers.length === 0 ? <div className="empty">Your paper list is empty. Press <b>Add papers</b> and paste arXiv ids, arXiv links or DOIs to start it.</div>
+        : filtered.length === 0 ? <div className="empty">No paper matches these filters.</div> : (
         <table className="lec papers">
           <thead><tr><th aria-label="Select"></th><th>#</th><th>Title</th><th>Status</th><th>Open</th></tr></thead>
           <tbody>

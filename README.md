@@ -88,14 +88,21 @@ $F home [--set FOLDER]               # show or choose the data folder
 - **Courses**: every folder with videos on your drives (up to 3 levels deep), with resume, ticks and "Copy to Mac" for studying without the disk.
 - **Downloads**: download lectures, point a course at a folder you downloaded by hand, rename hand-downloaded files to the playlist titles, move a course
   to another drive (ticks and positions come along), and **single videos**: paste a YouTube link, download it to any folder. "Remove link" never deletes a file.
-- **Papers** (optional, `[papers]` in `config.toml`): a view of a paper list CSV (default `Paper_Database.csv` in the library folder; columns such as
-  `S. No`, `Title`, `Link`, `Local Link`), in-app reading, question banks (`banks_dir`), arXiv / direct-PDF download into `papers/inbox/` (never into the library),
+- **Papers**: a view of a paper list CSV, in-app reading, question banks (`banks_dir`), arXiv / direct-PDF download into `papers/inbox/` (never into the library),
   and "Make a book" from chosen papers.
 - **Add papers** (Papers tab): paste arXiv ids or links, or DOIs; they are looked up on arXiv / Crossref, papers already in the list are marked (matched on arXiv id,
   DOI or link) and cannot be added twice; choose a topic and a note for each, then Add. This is the only time CourseShelf writes the paper list. If your library has
   its own rules (ordering, numbering, checks), give its tool in `[papers] add_command = ["python3", "/path/to/add_papers.py"]`: CourseShelf writes the chosen papers
   to a JSON file and runs the command with that file as its last argument, in the library folder (exit code 0 = added; its output is the job's log). Without
   `add_command` the rows are appended to the end of the list after a backup copy in `<data folder>/papers/backups/`.
+- **Which paper list**: with no setup, CourseShelf keeps its own list in `<data folder>/papers/papers.csv`, made by your first **Add papers**. To use a library of
+  your own instead, add `[papers]` to `config.toml` with `library = "/path/to/folder"` (the list defaults to `Paper_Database.csv` in it; set `list = "..."` for
+  another name). The list needs at least the columns `Title` and `Link`; CourseShelf also reads `S. No`, `DL_Topic`, `Local Link` (a `file://` link to the PDF)
+  and `Notes`, for example:
+  ```csv
+  S. No,Title,DL_Topic,Link,Local Link,Notes
+  1,Attention Is All You Need,Transformers,https://arxiv.org/abs/1706.03762,,
+  ```
 - **Books**: every PDF under the folders in `[pdf_sources]`, with pen, highlighter, shapes, text and pictures; marks are stored apart from the PDF and follow the
   file's content, so a moved or renamed PDF keeps its marks. A ☆ bookmarks a book.
 

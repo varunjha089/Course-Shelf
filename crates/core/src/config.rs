@@ -96,6 +96,25 @@ pub struct PapersPaths {
     pub banks_csv: PathBuf,
     /// `[papers] add_command` (empty: append to the list).
     pub add_command: Vec<String>,
+    /// No `[papers]` section: the list is CourseShelf's own starter list in the data folder, which "Add papers" may create.
+    pub starter: bool,
+}
+
+impl PapersPaths {
+    /// The paper setup when config.toml has no `[papers]` section: everything in `<data folder>/papers/`, the list `papers.csv`
+    /// (made by the first "Add papers"). A configured library is never created this way.
+    pub fn starter(home: &Path) -> PapersPaths {
+        let library = home.join("papers");
+        PapersPaths {
+            list_csv: library.join("papers.csv"),
+            banks_dir: library.join("Question_Full"),
+            inbox: library.join("inbox"),
+            banks_csv: library.join("banks.csv"),
+            library,
+            add_command: vec![],
+            starter: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -182,7 +201,8 @@ subtitle_langs = "en,-live_chat"
 est_gb_per_hour = 1.3            # only used by `plan` for its size estimate
 extra_args = []                  # e.g. ["--cookies-from-browser", "chrome"]
 
-# Optional: a paper library for the Papers tab (a folder with a paper list CSV). Read-only: CourseShelf never edits it.
+# Optional: a paper library for the Papers tab (a folder with a paper list CSV). CourseShelf writes it only through "Add papers".
+# Without this section the Papers tab keeps its own list in papers/papers.csv in this data folder (made by the first "Add papers").
 # [papers]
 # library = "~/Papers"
 # list = "Paper_Database.csv"     # columns: S. No, Title, Link, Local Link, ... (see README)
@@ -245,6 +265,7 @@ impl Config {
                 inbox: rel(p.inbox.as_deref().unwrap_or("papers/inbox")),
                 banks_csv: rel(p.banks.as_deref().unwrap_or("papers/banks.csv")),
                 add_command: p.add_command.clone(),
+                starter: false,
             }
         });
         let pdf_folders = raw.pdf_sources.unwrap_or_default().folders.iter().map(|f| { let x = expand_home(f); if x.is_absolute() { x } else { home.join(x) } }).collect();
@@ -388,9 +409,11 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("config.toml"), "[drives.x]\npath = \"/tmp/x\"\n[papers]\nlibrary = \"/lib\"\n").unwrap();
         let p = Config::load(&d).unwrap().papers.unwrap();
+        assert!(!p.starter);
         assert_eq!((p.list_csv, p.banks_dir), (PathBuf::from("/lib/Paper_Database.csv"), PathBuf::from("/lib/Question_Full")));
         std::fs::write(d.join("config.toml"), "[drives.x]\npath = \"/tmp/x\"\n[papers]\nlibrary = \"/lib\"\nlist = \"my_papers.csv\"\nbanks_dir = \"/q\"\n").unwrap();
         let p = Config::load(&d).unwrap().papers.unwrap();
+        assert!(!p.starter);
         assert_eq!((p.list_csv, p.banks_dir), (PathBuf::from("/lib/my_papers.csv"), PathBuf::from("/q")));
         let _ = std::fs::remove_dir_all(&d);
     }
