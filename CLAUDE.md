@@ -143,3 +143,6 @@ An unplugged disk shows "not connected"; never create folders on a missing disk 
   at the end). Push to `origin` after every change that is verified (tests pass, the new commits scanned clean): the owner asked for this on 2026-10-24; push `main` only; never rewrite pushed history. Scan new commits for personal paths and data before a push.
 - Tracked: `crates/`, `app/` (without `node_modules`), `web/src`, `web/public`, `examples/`, README, CLAUDE.md, LICENSE. Never: build output, `node_modules`, user data, `*.local.md`.
 - A release: raise `version` in `app/src-tauri/tauri.conf.json`, describe it in `README.md`, run the fresh-clone test, commit, tag `vX.Y.Z`.
+- There is no built download and no self-updater yet: users build from source. The plan (like The Data Application's updater, VLC-style): Tauri's updater
+  plugin, a signing key pair (the private key as a repository secret), and a GitHub Actions macOS workflow that builds and publishes a signed release for each
+  tag; the app checks `releases/latest` and offers Install and restart. Pushing a workflow file needs a token with the `workflow` scope.
