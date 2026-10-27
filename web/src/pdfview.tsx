@@ -355,6 +355,7 @@ export function PdfAnnotator({ kind, refId, src, name, onReveal, chapters }: { k
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pendingImage, setPendingImage] = useState<Ctx["pendingImage"]>(null);
   const [panel, setPanel] = useState<null | "contents" | "notes" | "marks" | "search">("contents");
+  const [sideOpen, setSideOpen] = useState(true);     // the side panel can fold into a thin strip to give the page the room
   const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
   const [msg, setMsg] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
@@ -635,6 +636,7 @@ export function PdfAnnotator({ kind, refId, src, name, onReveal, chapters }: { k
         setWidths((w) => (tool === "pen" ? { ...w, pen: Math.max(0.5, Math.min(24, w.pen * d)) } : tool === "hl" ? { ...w, hl: Math.max(4, Math.min(48, w.hl * d)) } : { ...w, shape: Math.max(0.5, Math.min(16, w.shape * d)) }));
         return;
       }
+      if (k === "\\") { e.preventDefault(); setSideOpen((o) => !o); return; }
       if (k === "pagedown" && !e.shiftKey) { e.preventDefault(); goPage(Math.min((pdf?.numPages ?? 1), page + 1)); }
       if (k === "pageup") { e.preventDefault(); goPage(Math.max(1, page - 1)); }
     };
@@ -721,9 +723,16 @@ export function PdfAnnotator({ kind, refId, src, name, onReveal, chapters }: { k
       {showExport && pdf && <ExportPanel name={name} total={pdf.numPages} src={src} els={els} margin={margin} keyId={key} onClose={() => setShowExport(false)} setMsg={setMsg} />}
 
       <div className="abody">
-        <aside className="aside">
+        {!sideOpen && (
+          <aside className="aside closed">
+            <button className="btn sm" onClick={() => setSideOpen(true)} title="Show the side panel (key \)" aria-label="Show the side panel">▶</button>
+            {(["contents", "notes", "marks", "search"] as const).map((p) => <button key={p} className="vtab" onClick={() => { setPanel(p); setSideOpen(true); }}>{p === "marks" ? "Bookmarks" : p[0].toUpperCase() + p.slice(1)}</button>)}
+          </aside>
+        )}
+        {sideOpen && <aside className="aside">
           <div className="atabs">
             {(["contents", "notes", "marks", "search"] as const).map((p) => <button key={p} className={"btn sm" + (panel === p ? " primary" : "")} onClick={() => setPanel(panel === p ? null : p)}>{p === "marks" ? "Bookmarks" : p[0].toUpperCase() + p.slice(1)}</button>)}
+            <button className="btn sm hidebtn" onClick={() => setSideOpen(false)} title="Hide the side panel to give the page more room (key \)" aria-label="Hide the side panel">◀ Hide</button>
           </div>
           {panel === "contents" && pdf && (chapters?.length ? <Chapters chapters={chapters} page={page} goPage={goPage} /> : <Contents pdf={pdf} goPage={goPage} />)}
           {panel === "notes" && <Notes els={els} goPage={goPage} select={(id, p) => { setSelectedId(id); setTool("select"); goPage(p); }} />}
@@ -734,7 +743,7 @@ export function PdfAnnotator({ kind, refId, src, name, onReveal, chapters }: { k
             </div>
           )}
           {panel === "search" && pdf && <Search pdf={pdf} goPage={goPage} />}
-        </aside>
+        </aside>}
         <div className="ascroll" ref={scroller} onScroll={onScroll}>
           {err && <div className="err">{err}</div>}
           {!pdf && !err && <p className="muted" style={{ padding: "1rem" }}>Opening…</p>}

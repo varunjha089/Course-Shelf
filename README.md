@@ -105,6 +105,8 @@ $F home [--set FOLDER]               # show or choose the data folder
   ```
 - **Books**: every PDF under the folders in `[pdf_sources]`, with pen, highlighter, shapes, text and pictures; marks are stored apart from the PDF and follow the
   file's content, so a moved or renamed PDF keeps its marks. A ☆ bookmarks a book.
+  The side panel (Contents, Notes, Bookmarks, Search) folds into a thin strip with **◀ Hide** or the `\` key, so the page gets the whole
+  width (with Fit width on, the page grows to fill it); **▶** or a tab name in the strip opens it again.
 
 ## Development
 
