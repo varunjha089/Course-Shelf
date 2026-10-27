@@ -60,7 +60,9 @@ crates/server/src/
   collections.rs           books joined from papers (pdfunite), missing papers downloaded first, rename / reorder / delete
   main.rs                  courseshelf-serve: the server alone, for a browser or tests
 crates/fetch/src/          courseshelf-fetch (main.rs) and import-plans (importer.rs: provider = first word of the heading)
-web/                       React + Vite + TypeScript: src/App.tsx (all pages), api.ts (typed calls), pdfview.tsx, annotmodel.ts, styles.css; public/pdfjs
+web/                       React + Vite + TypeScript: src/App.tsx (all pages, hash router at the top), api.ts (typed calls), annotmodel.ts, styles.css; public/pdfjs
+  src/pdfview.tsx          the PDF viewer: toolbar, ONE keydown handler for every key (tools g v p h e r o l a t, [ ] width, +/- zoom, \ side panel),
+                           side panel (Contents / Notes / Bookmarks / Search; folds to a strip), Fit width follows the scroller's size (ResizeObserver)
 app/src-tauri/             Tauri shell (identifier io.github.courseshelf): calls ensure_home, starts the server in-process, opens the window
 examples/                  config.toml, courses.csv, course_plan.md: what a new user starts from
 ```
@@ -101,6 +103,20 @@ PATH (it answers `-J` with JSON and writes a tiny mp4 with `ffmpeg -f lavfi` plu
 once, then call the API with `-b jar`. Headless Chrome (`--headless=new --virtual-time-budget=6000 --dump-dom "<url>#/manage"`) checks that a page renders.
 A Finder launch: `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin <app>/Contents/MacOS/courseshelf-app` with `COURSESHELF_URL_FILE=<file>` (the app writes its address there).
 Before sharing a version: a fresh clone, `npm install`, the build and `cargo test`, and a first start with a scratch `HOME`.
+
+**Fast check of a viewer / UI change (about 2 minutes):**
+1. `web`: `npx tsc --noEmit && npm run build`; `cargo build -p courseshelf-server` (the server embeds `web/dist` at compile time, so build the UI first).
+2. Scratch data folder: run `COURSESHELF_HOME=<scratch>/home courseshelf-serve --help` once (it writes the starter config), then add a drive and a PDF folder,
+   because the starter config has **no drive and `/api/books` answers 500 without one**:
+   `[drives.local] path = "<scratch>/drive"` and `[pdf_sources] folders = ["<scratch>/books"]` with one sample PDF copied into `books/`.
+3. `courseshelf-serve --port N --ui web/dist`, `curl -c jar "<printed url>"`, `curl -b jar .../api/books` gives the 16-hex id; the viewer is `<url>#/pdf/book/<id>`.
+4. Headless Chrome screenshots the toolbar and panels but the PDF itself stays "Opening…"; to see pages or click, use the Chrome extension tools. Its key action
+   does not send `\` (and other symbol keys may fail): test a key with `document.body.dispatchEvent(new KeyboardEvent('keydown', {key: '\\', bubbles: true}))`.
+5. Stop the server and delete the scratch folder.
+
+Pitfalls seen: a JSX attribute string is literal (`title="key \"`, not `"key \\"`); quit the installed app with `osascript -e 'tell application "CourseShelf" to quit'`
+(check `pgrep -f "/Applications/CourseShelf.app/Contents/MacOS"` first); after installing, `grep -a -c "<new UI text>" /Applications/CourseShelf.app/Contents/MacOS/courseshelf-app`
+confirms the new UI is inside.
 
 ## Making a book from a list of papers (scripted)
 
