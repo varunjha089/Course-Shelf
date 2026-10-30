@@ -3,7 +3,6 @@
 
 use anyhow::{bail, Context, Result};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -20,8 +19,22 @@ pub struct MovePlan {
     pub already_there: usize,
 }
 
+/// Which disk holds `p`: two paths with the same id can be moved with a plain rename.
+#[cfg(unix)]
 fn dev(p: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
     std::fs::metadata(p).ok().map(|m| m.dev())
+}
+
+/// Windows has no device number in the metadata: the drive letter (or network share) of the full path names the disk.
+#[cfg(not(unix))]
+fn dev(p: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let full = p.canonicalize().ok()?;
+    let std::path::Component::Prefix(prefix) = full.components().next()? else { return None };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    prefix.as_os_str().to_string_lossy().to_uppercase().hash(&mut h);
+    Some(h.finish())
 }
 
 impl MovePlan {

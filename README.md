@@ -1,6 +1,8 @@
 # CourseShelf
 
-An offline library for video courses and PDFs, for macOS (Rust + Tauri; the core also builds on Linux and Windows). Download the lectures you
+[![Build](https://github.com/varunjha089/Course-Shelf/actions/workflows/build.yml/badge.svg)](https://github.com/varunjha089/Course-Shelf/actions/workflows/build.yml)
+
+An offline library for video courses and PDFs, made for macOS and also built for Windows and Linux (Rust + Tauri). Download the lectures you
 want from YouTube playlists once, then watch them offline with resume and ticks, keep them on several disks, read and annotate PDFs and books,
 and browse a paper library.
 
@@ -14,16 +16,28 @@ Nothing in the app touches the network unless you press a download button; nothi
 
 ## Getting started
 
-1. **Tools**: [Rust](https://rustup.rs), [Node.js](https://nodejs.org) 18+, and for downloading `yt-dlp`, `ffmpeg` (with `ffprobe`) and `deno`
-   (`brew install yt-dlp ffmpeg deno` on a Mac). `pdfunite` and `pdfinfo` (`brew install poppler`) are needed only to join papers into books.
+1. **Tools**: [Rust](https://rustup.rs), [Node.js](https://nodejs.org) 20.19+ or 22.12+ (the UI's Vite needs it), and for downloading `yt-dlp`,
+   `ffmpeg` (with `ffprobe`) and `deno`. `pdfunite` and `pdfinfo` (poppler) are needed only to join papers into books.
+   - macOS: `brew install yt-dlp ffmpeg deno poppler`
+   - Windows: `winget install yt-dlp.yt-dlp Gyan.FFmpeg DenoLand.Deno oschwartz10612.Poppler`; building the app also needs the
+     [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and WebView2 (already part of Windows 10 and 11).
+     CourseShelf finds tools on the PATH and in winget's, Scoop's and Chocolatey's folders.
+   - Linux (Debian/Ubuntu): `sudo apt install ffmpeg poppler-utils libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev`, plus yt-dlp and deno from their sites.
 2. **Build**:
    ```sh
    git clone https://github.com/varunjha089/Course-Shelf.git && cd Course-Shelf
    cd web && npm install && npm run build && cd ..      # the UI (the server embeds web/dist)
-   cd app && npm install && npx tauri build && cd ..    # CourseShelf.app in target/release/bundle/macos/
+   cd app && npm install && npx tauri build && cd ..    # macOS: CourseShelf.app in target/release/bundle/macos/
    cargo build --release -p courseshelf-fetch           # the downloader
    ```
-   Copy `CourseShelf.app` to /Applications (keep only one copy, or Launchpad shows two).
+   Copy `CourseShelf.app` to /Applications (keep only one copy, or Launchpad shows two). On Windows build the installer with
+   `npx tauri build --bundles nsis` (in `target\release\bundle\nsis\`), on Linux a package with `npx tauri build --bundles deb`.
+
+   **Ready-made builds:** every push to `main` is built and tested on macOS, Windows and Linux by GitHub Actions
+   (`.github/workflows/build.yml`). Open the latest green run under [Actions](https://github.com/varunjha089/Course-Shelf/actions) and download
+   `CourseShelf-macOS`, `CourseShelf-Windows` or `CourseShelf-Linux` (signed in to GitHub). They are **not signed**: macOS says the app "cannot be
+   opened" (right-click it, Open, then Open again, or run `xattr -dr com.apple.quarantine CourseShelf.app`), and Windows SmartScreen asks you to
+   confirm (More info, Run anyway).
 3. **First start** makes your **data folder** with a starter `config.toml` and an empty `courses.csv`. Nothing of yours is ever kept in the program
    folder, so you can update or move the program freely.
 4. Edit `config.toml` (your drives: the folders that hold courses), add courses to `courses.csv`, then `courseshelf-fetch plan` and `courseshelf-fetch run`,
@@ -113,5 +127,7 @@ $F home [--set FOLDER]               # show or choose the data folder
 `cargo test` (core and server unit tests), `cd web && npx tsc --noEmit`. Run the viewer in a browser: `./target/debug/courseshelf-serve --port 8765 --ui web/dist`
 and open the printed URL (it carries a per-run key; the server listens on 127.0.0.1 only). To test without your own data, give it a scratch folder:
 `COURSESHELF_HOME=/tmp/cs-test courseshelf-serve` (a starter config is written there). How the code is organised: `CLAUDE.md`.
+GitHub Actions runs the same checks (UI type check and build, `cargo test`, the downloader and the app) on macOS, Windows and Linux for every push and
+pull request; a change that breaks one of them shows a red cross on the commit.
 
 Licence: MIT (see `LICENSE`).

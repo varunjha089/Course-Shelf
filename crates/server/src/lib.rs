@@ -917,13 +917,8 @@ async fn api_open(State(app): State<Shared>, Json(r): Json<OpenReq>) -> Response
         _ => None,
     };
     let Some(t) = target else { return StatusCode::NOT_FOUND.into_response() };
-    let mut cmd = courseshelf_core::tools::command("open");
-    if reveal && r.kind != "external" {
-        cmd.arg("-R");
-    }
-    match cmd.arg(&t).status() {
-        Ok(s) if s.success() => Json(serde_json::json!({ "ok": true })).into_response(),
-        Ok(s) => err500(anyhow!("open exited with {s}")),
+    match courseshelf_core::tools::open(std::ffi::OsStr::new(&t), reveal && r.kind != "external") {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => err500(e.into()),
     }
 }

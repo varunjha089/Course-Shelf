@@ -1163,7 +1163,7 @@ function FolderPicker({ onPick, onClose, anyFolder = false, noCreate = false, ti
         <button className="btn sm" onClick={() => go(typed)}>Go</button>
         <button className="btn sm" onClick={() => go("/Volumes")}>Disks</button>
         {b?.home && <button className="btn sm" onClick={() => go(b.home!)}>Home</button>}
-        {b?.parent && <button className="btn sm" onClick={() => go(b.parent!)}>▲ Up</button>}
+        {b && b.parent != null && <button className="btn sm" onClick={() => go(b.parent!)}>▲ Up</button>}
       </div>
       {err && <div className="err">{err}</div>}
       {b && (

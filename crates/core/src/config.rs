@@ -10,7 +10,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DriveCfg {
@@ -128,10 +128,15 @@ pub struct Config {
     pub ytdlp: YtdlpCfg,
 }
 
+/// The user's home folder: $HOME, or %USERPROFILE% on Windows.
+pub fn home_dir() -> Option<PathBuf> {
+    ["HOME", "USERPROFILE"].iter().filter_map(std::env::var_os).find(|h| !h.is_empty()).map(PathBuf::from)
+}
+
 pub fn expand_home(p: &str) -> PathBuf {
-    if let Some(rest) = p.strip_prefix("~/") {
-        if let Some(h) = std::env::var_os("HOME") {
-            return PathBuf::from(h).join(rest);
+    if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
+        if let Some(h) = home_dir() {
+            return h.join(rest);
         }
     }
     PathBuf::from(p)
@@ -277,7 +282,7 @@ impl Config {
         if let Some(n) = &self.mac.drive {
             return self.drives.iter().find(|d| &d.name == n);
         }
-        self.drives.iter().find(|d| !d.root.starts_with("/Volumes"))
+        self.drives.iter().find(|d| !d.is_external())
     }
 
     pub fn mac_max_bytes(&self) -> Option<u64> {
@@ -291,17 +296,62 @@ impl Config {
     }
 }
 
+/// (free_bytes, total_bytes) of the filesystem holding the existing path `p`.
+#[cfg(unix)]
+fn disk_space(p: &Path) -> Option<(u64, u64)> {
+    let c = std::ffi::CString::new(p.to_string_lossy().as_bytes()).ok()?;
+    unsafe {
+        let mut st: libc::statvfs = std::mem::zeroed();
+        if libc::statvfs(c.as_ptr(), &mut st) != 0 {
+            return None;
+        }
+        let bs = st.f_frsize as u64;
+        Some((st.f_bavail as u64 * bs, st.f_blocks as u64 * bs))
+    }
+}
+
+#[cfg(windows)]
+fn disk_space(p: &Path) -> Option<(u64, u64)> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = p.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let (mut free, mut total, mut total_free) = (0u64, 0u64, 0u64);
+    let ok = unsafe { windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, &mut total_free) };
+    (ok != 0).then_some((free, total))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn disk_space(_p: &Path) -> Option<(u64, u64)> {
+    None
+}
+
 impl Drive {
-    /// The mount point to test for "is the disk plugged in": /Volumes/<X> for external disks, else the path itself or its parent.
+    /// The mount point to test for "is the disk plugged in": /Volumes/<X> for external disks on a Mac, the drive letter (E:\) or
+    /// network share on Windows, else the path itself or its parent.
     pub fn mount_point(&self) -> PathBuf {
-        let mut comps = self.root.components();
         let s = self.root.to_string_lossy();
         if let Some(rest) = s.strip_prefix("/Volumes/") {
             let first = rest.split('/').next().unwrap_or("");
             return PathBuf::from("/Volumes").join(first);
         }
-        let _ = comps.next();
+        if let Some(Component::Prefix(prefix)) = self.root.components().next() {
+            return PathBuf::from(prefix.as_os_str()).join(std::path::MAIN_SEPARATOR_STR);
+        }
         if self.root.exists() { self.root.clone() } else { self.root.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| self.root.clone()) }
+    }
+
+    /// A removable or second disk rather than this computer's own: /Volumes/... on a Mac, /media, /mnt or /run/media on Linux,
+    /// any drive letter but the system drive (%SystemDrive%, usually C:) on Windows.
+    pub fn is_external(&self) -> bool {
+        if ["/Volumes", "/media", "/mnt", "/run/media"].iter().any(|m| self.root.starts_with(m)) {
+            return true;
+        }
+        match self.root.components().next() {
+            Some(Component::Prefix(prefix)) => {
+                let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+                !prefix.as_os_str().to_string_lossy().eq_ignore_ascii_case(&system)
+            }
+            _ => false,
+        }
     }
 
     pub fn connected(&self) -> bool {
@@ -316,15 +366,7 @@ impl Drive {
                 return None;
             }
         }
-        let c = std::ffi::CString::new(p.to_string_lossy().as_bytes()).ok()?;
-        unsafe {
-            let mut st: libc::statvfs = std::mem::zeroed();
-            if libc::statvfs(c.as_ptr(), &mut st) != 0 {
-                return None;
-            }
-            let bs = st.f_frsize as u64;
-            Some((st.f_bavail as u64 * bs, st.f_blocks as u64 * bs))
-        }
+        disk_space(&p)
     }
 
     /// Create the library root and its hidden state folder (with a drive id) if missing.
@@ -407,14 +449,15 @@ mod tests {
         let d = std::env::temp_dir().join(format!("cs_pap_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("config.toml"), "[drives.x]\npath = \"/tmp/x\"\n[papers]\nlibrary = \"/lib\"\n").unwrap();
+        let root = if cfg!(windows) { "C:/" } else { "/" }; // an absolute path on this system
+        std::fs::write(d.join("config.toml"), format!("[drives.x]\npath = \"/tmp/x\"\n[papers]\nlibrary = \"{root}lib\"\n")).unwrap();
         let p = Config::load(&d).unwrap().papers.unwrap();
         assert!(!p.starter);
-        assert_eq!((p.list_csv, p.banks_dir), (PathBuf::from("/lib/Paper_Database.csv"), PathBuf::from("/lib/Question_Full")));
-        std::fs::write(d.join("config.toml"), "[drives.x]\npath = \"/tmp/x\"\n[papers]\nlibrary = \"/lib\"\nlist = \"my_papers.csv\"\nbanks_dir = \"/q\"\n").unwrap();
+        assert_eq!((p.list_csv, p.banks_dir), (PathBuf::from(format!("{root}lib/Paper_Database.csv")), PathBuf::from(format!("{root}lib/Question_Full"))));
+        std::fs::write(d.join("config.toml"), format!("[drives.x]\npath = \"/tmp/x\"\n[papers]\nlibrary = \"{root}lib\"\nlist = \"my_papers.csv\"\nbanks_dir = \"{root}q\"\n")).unwrap();
         let p = Config::load(&d).unwrap().papers.unwrap();
         assert!(!p.starter);
-        assert_eq!((p.list_csv, p.banks_dir), (PathBuf::from("/lib/my_papers.csv"), PathBuf::from("/q")));
+        assert_eq!((p.list_csv, p.banks_dir), (PathBuf::from(format!("{root}lib/my_papers.csv")), PathBuf::from(format!("{root}q"))));
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -459,6 +502,27 @@ mod tests {
         let d = Drive { name: "x".into(), root: PathBuf::from("/Volumes/Foo/CourseShelf/sub"), budget_gb: None };
         assert_eq!(d.mount_point(), PathBuf::from("/Volumes/Foo"));
         assert!(!d.connected());
+        assert!(d.is_external());
+        assert!(!Drive { name: "y".into(), root: PathBuf::from("/Users/z/Courses"), budget_gb: None }.is_external());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_letters() {
+        let d = Drive { name: "x".into(), root: PathBuf::from(r"Q:\Courses\sub"), budget_gb: None };
+        assert_eq!(d.mount_point(), PathBuf::from(r"Q:\"));
+        assert!(d.is_external());
+        let sys = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        assert!(!Drive { name: "y".into(), root: PathBuf::from(format!(r"{sys}\Courses")), budget_gb: None }.is_external());
+        let (free, total) = Drive { name: "y".into(), root: PathBuf::from(format!(r"{sys}\")), budget_gb: None }.space().unwrap();
+        assert!(total > 0 && free <= total);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn free_space_of_the_temp_disk() {
+        let (free, total) = Drive { name: "t".into(), root: std::env::temp_dir(), budget_gb: None }.space().unwrap();
+        assert!(total > 0 && free <= total);
     }
 
     #[test]

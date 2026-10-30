@@ -1,5 +1,12 @@
 # Windows build issues
 
+**Status (2026-10-30): fixed.** Sections 1 and 2 are done: the Unix-only code now has a Windows version (free space through `GetDiskFreeSpaceExW`,
+the same-disk check through the drive letter, tools found as `name.exe` and in winget / Scoop / Chocolatey folders, files opened with Explorer, the folder
+browser starts at the list of drives), the README gives the `winget` commands, and the app has the `icon.ico` Windows needs. The core, the server, the
+downloader, their tests and the Tauri app compile for Windows (`x86_64-pc-windows-gnu`, checked from macOS). The GitHub Actions workflow
+(`.github/workflows/build.yml`) builds and tests on `windows-latest` (and macOS, Linux) on every push; its first green Windows run closes section 3.
+The original report follows.
+
 Tried on Windows 11 (10.0.26300), Rust 1.99.1 (`x86_64-pc-windows-gnu`), Node.js 26.13.0, commit cloned from `main` on 2026-10-30.
 
 The README says the core also builds on Windows. It does not with the current code.

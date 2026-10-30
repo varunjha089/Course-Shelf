@@ -334,16 +334,15 @@ struct RevealReq {
 }
 
 async fn api_reveal(State(app): State<Shared>, Json(r): Json<RevealReq>) -> Response {
-    if r.file.contains('/') || r.file.contains("..") {
+    if r.file.contains(['/', '\\']) || r.file.contains("..") {
         return StatusCode::NOT_FOUND.into_response();
     }
     let p = dir(&app).join("exports").join(&r.file);
     if !p.is_file() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    match courseshelf_core::tools::command("open").arg("-R").arg(&p).status() {
-        Ok(s) if s.success() => Json(serde_json::json!({ "ok": true })).into_response(),
-        Ok(s) => err500(anyhow!("open exited with {s}")),
+    match courseshelf_core::tools::open(p.as_os_str(), true) {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => err500(e.into()),
     }
 }

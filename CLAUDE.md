@@ -6,7 +6,8 @@ folder, drives, history) and is never committed.
 
 ## What it is
 
-An offline library for video courses and PDFs. Rust core + Tauri 2 window + React/TypeScript UI, for macOS (the core also builds on Linux and Windows).
+An offline library for video courses and PDFs. Rust core + Tauri 2 window + React/TypeScript UI, made on macOS; GitHub Actions builds and tests it on macOS,
+Windows and Linux (`.github/workflows/build.yml`).
 Tabs: **Courses** (watch, resume, ticks, copy to this computer), **Downloads** (yt-dlp downloads, single YouTube links, point / match / move courses, drives),
 **Papers** (a paper list CSV: your own library through `[papers]`, else a starter list in the data folder; question banks, arXiv download to the inbox,
 "make a book", "add papers"), **Books** (PDF viewer with annotations).
@@ -51,7 +52,8 @@ crates/core/src/           no UI, no HTTP: everything that touches disk or tools
   papers.rs                paper list reader (columns S. No, Title, Link, Local Link, ...), arXiv inbox
   addpapers.rs             "Add papers": parse pasted ids / DOIs, arXiv API + Crossref lookup (curl), append with a backup when there is no add_command;
                            start_list makes the starter list
-  tools.rs                 finds yt-dlp / ffmpeg / ffprobe / deno / pdfinfo; ALWAYS launch tools through tools::command
+  tools.rs                 finds yt-dlp / ffmpeg / ffprobe / deno / pdfinfo (also `name.exe` and winget/Scoop/Chocolatey folders on Windows); ALWAYS
+                           launch tools through tools::command; tools::open opens or reveals a file (open / explorer / xdg-open), never call `open` directly
 crates/server/src/
   lib.rs                   axum server on 127.0.0.1 (random port), cookie token, Host check, routes, video streaming with Range
   manage.rs                Downloads-tab endpoints (overview incl. the data folder, plan, download, jobs, adopt, move, drives, browse, singles)
@@ -132,6 +134,18 @@ What the Papers tab's "Make a book" does, for a list given in chat (only when th
 A separate `courseshelf-serve` on the same data folder works while the app is open (the app re-reads `collections.json` and `config.toml` on each request), but the
 book lock is per process: do not let the user make a book in the app at the same moment. Stop the server afterwards.
 
+## Code that differs per operating system
+
+The core must compile on macOS, Windows and Linux (the workflow checks all three). Keep OS-specific code behind `#[cfg(unix)]` / `#[cfg(windows)]` with a
+version for each, and never use `std::os::unix`, `libc` or a macOS-only command unguarded. Today: free space (`config::disk_space`: statvfs / GetDiskFreeSpaceExW,
+via the target-specific `libc` / `windows-sys` dependencies), the same-disk check (`mover::dev`: device number / drive letter), the home folder
+(`config::home_dir`: HOME, else USERPROFILE), external drives (`Drive::is_external`: /Volumes, /media, /mnt or a drive letter that is not %SystemDrive%;
+`Drive::mount_point` is the drive letter on Windows), opening files (`tools::open`) and the folder browser's start (/Volumes, the list of drive letters, /media).
+Tests that need a Unix tool (`sh`, `ls`) are `#[cfg(unix)]`; build test paths with an absolute root of the OS (`C:/` on Windows: `/lib` is not absolute there).
+Check Windows from the Mac before pushing (MinGW from Homebrew, `rustup target add x86_64-pc-windows-gnu`):
+`cargo test --workspace --exclude courseshelf-app --target x86_64-pc-windows-gnu --no-run` and `cargo check -p courseshelf-app --target x86_64-pc-windows-gnu`.
+This compiles but does not run the Windows tests: the workflow runs them. The app needs `icons/icon.ico` on Windows (made from `icon.png`).
+
 ## Things that went wrong before (do not repeat)
 
 - **"yt-dlp was not found" from Finder**: a Finder-launched app gets launchd's bare PATH. `tools.rs` also searches `/opt/homebrew/bin`, `/usr/local/bin`,
@@ -139,6 +153,8 @@ book lock is per process: do not let the user make a book in the app at the same
 - **Settings lost on every restart** when kept in browser storage (random port): keep them server-side.
 - **A same-disk move left the original behind; progress went to the wrong database**: fixed in `mover.rs` / `progress.rs`; keep their tests.
 - **Two app copies in Launchpad**: see the install step.
+- **The core did not compile on Windows** (`std::os::unix` in mover.rs, `libc::statvfs` in config.rs) while the README said it did; nothing built it there.
+  Fixed with the per-OS code above, and the workflow now builds every OS on each push.
 - **A single video is not a course until it is inside a drive**: a course is a FOLDER with videos, up to 3 levels under a drive root.
 - yt-dlp: YouTube sometimes answers 429 for subtitles (the lecture is kept); `--embed-subs` needs ffmpeg; VP9/AV1 may not play in the app's video engine,
   so H.264 wins only as a tie-breaker at equal resolution (`-S "res,vcodec:h264,acodec:aac"`).
@@ -166,6 +182,11 @@ An unplugged disk shows "not connected"; never create folders on a missing disk 
   at the end). Push to `origin` after every change that is verified (tests pass, the new commits scanned clean): the owner asked for this on 2026-10-24; push `main` only; never rewrite pushed history. Scan new commits for personal paths and data before a push.
 - Tracked: `crates/`, `app/` (without `node_modules`), `web/src`, `web/public`, `examples/`, README, CLAUDE.md, LICENSE. Never: build output, `node_modules`, user data, `*.local.md`.
 - A release: raise `version` in `app/src-tauri/tauri.conf.json`, describe it in `README.md`, run the fresh-clone test, commit, tag `vX.Y.Z`.
-- There is no built download and no self-updater yet: users build from source. The plan (like The Data Application's updater, VLC-style): Tauri's updater
-  plugin, a signing key pair (the private key as a repository secret), and a GitHub Actions macOS workflow that builds and publishes a signed release for each
-  tag; the app checks `releases/latest` and offers Install and restart. Pushing a workflow file needs a token with the `workflow` scope.
+- **GitHub Actions** (`.github/workflows/build.yml`): on every push to `main`, tag `v*`, pull request or manual run, on macOS, Windows and Linux: `npm ci`, `tsc`,
+  UI build, `cargo test --workspace --exclude courseshelf-app`, the release downloader, `npx tauri build --bundles app|nsis|deb`; the app and downloader are
+  kept as run artifacts `CourseShelf-<OS>` (unsigned). Linux needs the webkit2gtk-4.1 / GTK packages installed in the workflow. Look at the run after a push
+  (`/repos/.../actions/runs?branch=main`, read with the token header file); a red run is a broken change. Pushing a change to a file in `.github/workflows/`
+  needs a token with the `workflow` scope (a `repo`-only token is refused).
+- There is no self-updater or GitHub Release yet: users build from source or take a run's artifacts. The plan (like The Data Application's updater, VLC-style):
+  Tauri's updater plugin, a signing key pair (the private key as a repository secret), and a release job in the workflow that publishes a signed release for each
+  tag; the app checks `releases/latest` and offers Install and restart.

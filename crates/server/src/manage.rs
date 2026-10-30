@@ -161,7 +161,7 @@ pub async fn api_overview(State(app): State<Shared>) -> Json<ManageOut> {
                     free_bytes: sp.map(|x| x.0),
                     total_bytes: sp.map(|x| x.1),
                     budget_gb: d.budget_gb,
-                    is_mac: !d.root.starts_with("/Volumes"),
+                    is_mac: !d.is_external(),
                 }
             })
             .collect();
@@ -883,13 +883,37 @@ struct DirEntry {
     videos: usize,
 }
 
+/// Windows: the folder browser starts at the list of drives (C:\, D:\, ...), as a Mac starts at /Volumes.
+fn drive_letters() -> serde_json::Value {
+    let dirs: Vec<DirEntry> = (b'A'..=b'Z')
+        .map(|c| format!("{}:\\", c as char))
+        .filter(|d| Path::new(d).is_dir())
+        .map(|d| DirEntry { name: d.clone(), path: d, videos: 0 })
+        .collect();
+    serde_json::json!({ "path": "", "parent": null, "videos_here": 0, "dirs": dirs, "home": courseshelf_core::config::home_dir() })
+}
+
+/// Windows' canonical paths start with \\?\ (C:\x becomes \\?\C:\x): show and hand out the usual form.
+fn plain_path(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy().into_owned();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => p,
+    }
+}
+
 pub async fn api_browse(State(_app): State<Shared>, Query(q): Query<BrowseQ>) -> Response {
     let res = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
         let start: PathBuf = match q.path.as_deref() {
             Some(p) if !p.is_empty() => PathBuf::from(p),
-            _ => PathBuf::from("/Volumes"),
+            _ if cfg!(windows) => return Ok(drive_letters()),
+            _ if cfg!(target_os = "macos") => PathBuf::from("/Volumes"),
+            _ => ["/media", "/mnt", "/"].iter().map(PathBuf::from).find(|p| p.is_dir()).unwrap_or_default(),
         };
-        let dir = start.canonicalize().map_err(|_| anyhow!("{} does not exist", start.display()))?;
+        let dir = plain_path(start.canonicalize().map_err(|_| anyhow!("{} does not exist", start.display()))?);
         if !dir.is_dir() {
             bail!("{} is not a folder", dir.display());
         }
@@ -906,10 +930,11 @@ pub async fn api_browse(State(_app): State<Shared>, Query(q): Query<BrowseQ>) ->
         let here = library::scan_folder(&dir).len();
         Ok(serde_json::json!({
             "path": dir.to_string_lossy(),
-            "parent": dir.parent().map(|p| p.to_string_lossy().to_string()),
+            // Windows: above a drive's root comes the list of drives (an empty path)
+            "parent": dir.parent().map(|p| p.to_string_lossy().to_string()).or_else(|| cfg!(windows).then(String::new)),
             "videos_here": here,
             "dirs": dirs,
-            "home": std::env::var("HOME").ok(),
+            "home": courseshelf_core::config::home_dir().map(|h| h.to_string_lossy().to_string()),
         }))
     })
     .await;

@@ -69,6 +69,9 @@ pub fn tool_version_line(tool: &str) -> Option<String> {
 pub fn require_tools() -> Result<()> {
     for t in ["yt-dlp", "ffmpeg", "ffprobe"] {
         if crate::tools::find(t).is_none() {
+            if cfg!(windows) {
+                bail!("{t} was not found (looked in PATH and the winget, Scoop and Chocolatey folders); install it, e.g. `winget install yt-dlp.yt-dlp Gyan.FFmpeg DenoLand.Deno`");
+            }
             bail!("{t} was not found (looked in PATH and /opt/homebrew/bin, /usr/local/bin, ~/.local/bin); install it, e.g. `brew install {t}`");
         }
     }
