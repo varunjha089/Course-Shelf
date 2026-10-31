@@ -1217,4 +1217,127 @@ mod tests {
         assert_eq!(merge_alias_progress(&home), 0, "a second run changes nothing");
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    // ---------- the HTTP API through the real router (scratch data folder, no network) ----------
+
+    struct Scratch {
+        base: PathBuf,
+        app: Shared,
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    /// A data folder with a Mac drive holding course P/C (3 small "videos") in its own folder Extra/P/C, while courses.csv
+    /// plans it for an unplugged drive.
+    fn scratch(tag: &str) -> Scratch {
+        let base = std::env::temp_dir().join(format!("cs_api_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (home, mac) = (base.join("home"), base.join("mac"));
+        let dir = mac.join("Extra").join("P").join("C");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 1..=3 {
+            std::fs::write(dir.join(format!("00{i} - L{i}.mp4")), vec![i as u8; 2000 + i]).unwrap();
+        }
+        std::fs::write(
+            home.join("config.toml"),
+            format!("courses_csv = \"courses.csv\"\n[mac]\ndrive = \"local\"\n[drives.local]\npath = {:?}\n[drives.ssd]\npath = \"/Volumes/NoSuchDisk_cs_test/x\"\n", mac.to_string_lossy()),
+        )
+        .unwrap();
+        std::fs::write(home.join("courses.csv"), "course,playlist_url,items,priority,drive,quality_cap,enabled,note\nP/C,,all,1,ssd,,no,\n").unwrap();
+        locations::set(&home, "P/C", &dir).unwrap();
+        let app = Arc::new(App {
+            home,
+            token: "tok".into(),
+            port: 4321,
+            ui_dir: None,
+            papers_cache: Default::default(),
+            dl_gate: Default::default(),
+            jobs: jobs::Jobs::new(),
+            tidied: Default::default(),
+        });
+        Scratch { base, app }
+    }
+
+    async fn call(app: &Shared, method: &str, path: &str, body: Option<serde_json::Value>, cookie: bool) -> (StatusCode, serde_json::Value) {
+        let mut req = Request::builder().method(method).uri(path).header(header::HOST, "127.0.0.1:4321");
+        if cookie {
+            req = req.header(header::COOKIE, "cs=tok");
+        }
+        let req = match body {
+            Some(b) => req.header(header::CONTENT_TYPE, "application/json").body(Body::from(b.to_string())).unwrap(),
+            None => req.body(Body::empty()).unwrap(),
+        };
+        let resp = router(app.clone()).oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&bytes).into())))
+    }
+
+    #[tokio::test]
+    async fn api_needs_the_right_host_and_cookie() {
+        let s = scratch("auth");
+        assert_eq!(call(&s.app, "GET", "/api/state", None, false).await.0, StatusCode::UNAUTHORIZED);
+        let bad_host = Request::builder().uri("/api/state").header(header::HOST, "evil.example:4321").header(header::COOKIE, "cs=tok").body(Body::empty()).unwrap();
+        assert_eq!(router(s.app.clone()).oneshot(bad_host).await.unwrap().status(), StatusCode::FORBIDDEN);
+        assert_eq!(call(&s.app, "GET", "/api/state", None, true).await.0, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn downloads_tab_shows_where_a_course_really_is() {
+        let s = scratch("overview");
+        let (st, v) = call(&s.app, "GET", "/api/manage", None, true).await;
+        assert_eq!(st, StatusCode::OK);
+        let courses: Vec<&serde_json::Value> = v["courses"].as_array().unwrap().iter().filter(|c| c["course"].as_str().unwrap().ends_with('C')).collect();
+        assert_eq!(courses.len(), 1, "listed once: {courses:?}");
+        assert_eq!((courses[0]["drive"].as_str(), courses[0]["planned_drive"].as_str()), (Some("local"), Some("ssd")));
+        assert_eq!(courses[0]["on_disk"], 3);
+    }
+
+    #[tokio::test]
+    async fn tidy_endpoint_reports_what_it_did() {
+        let s = scratch("tidy");
+        let dir = s.base.join("mac/Extra/P/C");
+        std::fs::write(dir.join("001 - L1.info.json"), serde_json::json!({"id": "x1", "formats": vec![1; 500]}).to_string()).unwrap();
+        let (st, v) = call(&s.app, "POST", "/api/manage/tidy", Some(serde_json::json!({"course": "P/C"})), true).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert_eq!(v["shrunk"], 1);
+        let (_, again) = call(&s.app, "POST", "/api/manage/tidy", Some(serde_json::json!({})), true).await;
+        assert_eq!((again["shrunk"].as_u64(), again["hidden"].as_u64()), (Some(0), Some(0)));
+    }
+
+    #[tokio::test]
+    async fn move_into_a_chosen_folder_takes_the_progress_along() {
+        let s = scratch("move");
+        let (st, _) = call(&s.app, "POST", "/api/progress", Some(serde_json::json!({"drive": "local", "course": "P/C", "key": "001 - L1", "position": 42.0, "duration": 600.0})), true).await;
+        assert_eq!(st, StatusCode::OK);
+        let target = s.base.join("other").join("Mine");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let req = serde_json::json!({"course": "P/C", "to_drive": "", "to_folder": target.to_string_lossy()});
+        let (st, v) = call(&s.app, "POST", "/api/manage/move/start", Some(req), true).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        let mut status = String::new();
+        for _ in 0..100 {
+            let (_, j) = call(&s.app, "GET", "/api/manage/jobs", None, true).await;
+            status = j["jobs"][0]["status"].as_str().unwrap_or("").to_string();
+            if status == "done" || status == "failed" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(status, "done");
+        assert_eq!(library::scan_folder(&target).len(), 3);
+        assert_eq!(locations::load(&s.app.home).get("P/C").and_then(|p| p.canonicalize().ok()), target.canonicalize().ok());
+        let (_, state) = call(&s.app, "GET", "/api/state", None, true).await;
+        let c = state["courses"].as_array().unwrap().iter().find(|c| c["course"] == "P/C").unwrap().clone();
+        assert_eq!(c["lectures"][0]["position"], 42.0);
+        // a folder that already holds videos is refused
+        let busy = serde_json::json!({"course": "P/C", "to_drive": "", "to_folder": s.base.join("mac/Extra/P/C").to_string_lossy()});
+        std::fs::write(s.base.join("mac/Extra/P/C/009 - Other.mp4"), b"x").unwrap();
+        assert_eq!(call(&s.app, "POST", "/api/manage/move/plan", Some(busy), true).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    }
 }

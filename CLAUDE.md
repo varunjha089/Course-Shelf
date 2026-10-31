@@ -103,7 +103,8 @@ examples/                  config.toml, courses.csv, course_plan.md: what a new 
 ```sh
 . "$HOME/.cargo/env"                                   # cargo is often not on PATH in a fresh shell
 cd web && npm install && npx tsc --noEmit && npm run build && cd ..    # the UI (must exist before the Rust build)
-cargo test                                             # core, server and fetch tests
+cargo test                                             # core, server and fetch tests (server: API tests through the real router on a
+                                                       # scratch data folder; core/tests/download.rs: a whole download with a stand-in yt-dlp)
 cd app && npm install && npx tauri build && cd ..      # the app: target/release/bundle/macos/CourseShelf.app
 rm -rf /Applications/CourseShelf.app && cp -R target/release/bundle/macos/CourseShelf.app /Applications/ && rm -rf target/release/bundle/macos/CourseShelf.app
 ```
