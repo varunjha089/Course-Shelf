@@ -242,11 +242,8 @@ pub fn download_course(
     };
     let y = &cfg.ytdlp;
     // files start with the lecture number; for a reversed playlist that is counted from the end
-    let (number, progress_number) = if row.reverse {
-        ("playlist_count+1-playlist_index", "info.playlist_count+1-info.playlist_index")
-    } else {
-        ("playlist_index", "info.playlist_index")
-    };
+    // (yt-dlp does no arithmetic in the progress template, so the loop below numbers a reversed course's progress)
+    let number = if row.reverse { "playlist_count+1-playlist_index" } else { "playlist_index" };
     let mut cmd = crate::tools::command("yt-dlp");
     cmd.arg("--ignore-errors")
         .arg("--no-overwrites")
@@ -265,7 +262,7 @@ pub fn download_course(
         .args(["--retries", "10", "--fragment-retries", "10", "--concurrent-fragments", "4"])
         .args(["--playlist-items", &playlist_items(row, missing)])
         .args(["--progress", "--newline"])
-        .args(["--progress-template", &format!("download:CSPROG|%({progress_number})s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s")])
+        .args(["--progress-template", "download:CSPROG|%(info.playlist_index)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s"])
         .args(&y.extra_args)
         .arg(&row.playlist_url)
         .stdin(Stdio::null())
@@ -286,14 +283,20 @@ pub fn download_course(
     }
     drop(tx);
     let mut cancelled = false;
+    // the lecture number of the file being written (its name's prefix)
+    let mut current = 0;
     loop {
         match rx.recv_timeout(Duration::from_millis(250)) {
             Ok(line) => {
-                if let Some(ev) = parse_progress(&line) {
+                if let Some(mut ev) = parse_progress(&line) {
+                    if let (true, Event::Progress { index, .. }) = (row.reverse, &mut ev) {
+                        *index = current;
+                    }
                     on_event(ev);
                 } else if let Some(p) = line.strip_prefix("[download] Destination: ") {
                     let stem = Path::new(p).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
                     let (index, title) = library::split_prefix(&stem);
+                    current = index;
                     if index > 0 && !p.ends_with(".vtt") && !p.contains(".f") {
                         on_event(Event::Item { index, title });
                     }
