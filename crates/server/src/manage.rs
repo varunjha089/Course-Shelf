@@ -30,20 +30,7 @@ fn bad(msg: impl Into<String>) -> Response {
     (StatusCode::UNPROCESSABLE_ENTITY, msg.into()).into_response()
 }
 
-pub struct Located {
-    pub dir: PathBuf,
-    pub state_dir: PathBuf,
-    pub overridden: bool,
-}
-
-/// Where a course's folder is: an explicit location (locations.json) wins, else `<drive root>/<course>`.
-pub fn locate(cfg: &Config, home: &Path, row: &CourseRow) -> Result<Located> {
-    if let Some(p) = locations::load(home).get(&row.course) {
-        return Ok(Located { dir: p.clone(), state_dir: p.join(".courseshelf"), overridden: true });
-    }
-    let d = cfg.drive(&row.drive)?;
-    Ok(Located { dir: d.root.join(&row.course), state_dir: d.state_dir(), overridden: false })
-}
+pub use courseshelf_core::locations::{locate, Located};
 
 /// A course on disk, whether or not it has a row in courses.csv.
 pub struct CourseRef {

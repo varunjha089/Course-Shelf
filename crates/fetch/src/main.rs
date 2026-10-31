@@ -17,6 +17,7 @@ use courseshelf_core::{
     config::{default_home, Config, Drive},
     items::to_ytdlp,
     library,
+    locations::{host_drive, locate},
     spec::{load_courses, CourseRow},
 };
 use std::{collections::BTreeSet, path::PathBuf};
@@ -153,10 +154,6 @@ fn load(home: &std::path::Path, only: Option<&str>) -> Result<Ctx> {
     Ok(Ctx { cfg, rows })
 }
 
-fn course_dir(d: &Drive, row: &CourseRow) -> PathBuf {
-    d.root.join(&row.course)
-}
-
 fn gb(b: f64) -> String {
     format!("{:.1} GB", b / 1e9)
 }
@@ -275,7 +272,10 @@ fn list(home: &std::path::Path, url: &str) -> Result<()> {
 
 struct Todo<'a> {
     row: &'a CourseRow,
-    drive: &'a Drive,
+    /// The drive the course's folder is on (see `locations::host_drive`).
+    drive: Drive,
+    /// The course's folder (locations.json wins over `<drive>/<course>`).
+    dir: PathBuf,
     total: u32,
     wanted: Vec<u32>,
     missing: Vec<u32>,
@@ -287,17 +287,19 @@ struct Todo<'a> {
 fn build_todos<'a>(ctx: &'a Ctx, home: &std::path::Path) -> Result<Vec<Todo<'a>>> {
     let mut todos = Vec::new();
     for row in ctx.rows.iter().filter(|r| r.enabled) {
-        let drive = ctx.cfg.drive(&row.drive)?;
+        let loc = locate(&ctx.cfg, home, row)?;
+        let drive = host_drive(&ctx.cfg, row, &loc)?;
+        let dir = loc.dir;
         let pl = match ytdlp::playlist(home, &row.playlist_url, false) {
             Ok(p) => p,
             Err(e) => {
-                todos.push(Todo { row, drive, total: 0, wanted: vec![], missing: vec![], est_bytes: 0.0, title_warnings: vec![], note: format!("cannot read playlist: {e:#}") });
+                todos.push(Todo { row, drive, dir, total: 0, wanted: vec![], missing: vec![], est_bytes: 0.0, title_warnings: vec![], note: format!("cannot read playlist: {e:#}") });
                 continue;
             }
         };
         let total = pl.entries.len() as u32;
         let wanted = row.items.resolve(total);
-        let have: BTreeSet<u32> = if drive.connected() { library::downloaded_indexes(&course_dir(drive, row)) } else { BTreeSet::new() };
+        let have: BTreeSet<u32> = if drive.connected() { library::downloaded_indexes(&dir) } else { BTreeSet::new() };
         let missing: Vec<u32> = wanted.iter().copied().filter(|i| !have.contains(i)).collect();
         let secs: f64 = missing.iter().filter_map(|i| pl.entries.get(*i as usize - 1)).map(|e| e.duration.unwrap_or(0.0)).sum();
         let est_bytes = secs / 3600.0 * ctx.cfg.ytdlp.est_gb_per_hour * 1e9 * size_factor(row.quality_cap);
@@ -308,7 +310,7 @@ fn build_todos<'a>(ctx: &'a Ctx, home: &std::path::Path) -> Result<Vec<Todo<'a>>
             }
         }
         let title_warnings = ytdlp::verify_titles(home, row, &pl);
-        todos.push(Todo { row, drive, total, wanted, missing, est_bytes, title_warnings, note });
+        todos.push(Todo { row, drive, dir, total, wanted, missing, est_bytes, title_warnings, note });
     }
     Ok(todos)
 }
@@ -359,7 +361,7 @@ fn plan(home: &std::path::Path, only: Option<&str>) -> Result<()> {
         } else {
             "will download".into()
         };
-        println!("{:<4} {:<34} {:<6} {:>6} {:>7} {:>8} {:>10}  {}", t.row.priority, t.row.course, t.row.drive, t.wanted.len(), have, t.missing.len(), gb(t.est_bytes), status);
+        println!("{:<4} {:<34} {:<6} {:>6} {:>7} {:>8} {:>10}  {}", t.row.priority, t.row.course, t.drive.name, t.wanted.len(), have, t.missing.len(), gb(t.est_bytes), status);
         if !t.note.is_empty() && t.total > 0 {
             println!("       note: {}", t.note);
         }
@@ -429,7 +431,7 @@ fn run(home: &std::path::Path, only: Option<&str>, force_titles: bool) -> Result
             }
             ytdlp::Event::Checked { index, ok, message } => println!("  {} {index:03} {message}", if ok { "verified" } else { "FAILED  " }),
         };
-        let r = ytdlp::download_course(&ctx.cfg, t.row, &t.missing, &course_dir(t.drive, t.row), &mut sink, &cancel)?;
+        let r = ytdlp::download_course(&ctx.cfg, t.row, &t.missing, &t.dir, &mut sink, &cancel)?;
         println!("{}", r.summary());
         results.push(r);
     }
@@ -447,11 +449,10 @@ fn prune(home: &std::path::Path, only: Option<&str>) -> Result<()> {
     let ctx = load(home, only)?;
     let mut doomed: Vec<PathBuf> = Vec::new();
     for row in &ctx.rows {
-        let drive = ctx.cfg.drive(&row.drive)?;
-        if !drive.connected() {
+        let dir = locate(&ctx.cfg, home, row)?.dir;
+        if !dir.is_dir() {
             continue;
         }
-        let dir = course_dir(drive, row);
         let pl = match ytdlp::playlist(home, &row.playlist_url, false) {
             Ok(p) => p,
             Err(_) => continue,

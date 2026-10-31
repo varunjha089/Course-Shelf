@@ -50,7 +50,8 @@ crates/core/src/           no UI, no HTTP: everything that touches disk or tools
   fetcher.rs               yt-dlp: playlist listing (cached 6 h in cache/), download_course, verify_file (ffprobe length + codec)
   singles.rs               saved single YouTube links (singles.json), lookup, download
   adopt.rs, mover.rs       match hand-downloaded files to playlist titles; verified copy-then-delete move between drives
-  locations.rs             locations.json: a course that lives outside <drive>/<course>; relative_inside names such a folder when it lies inside a
+  locations.rs             locations.json: a course that lives outside <drive>/<course>. `locate` (the ONE way to find a course's folder; the
+                           app and courseshelf-fetch both use it), `host_drive` (the drive that folder is really on); relative_inside names such a folder when it lies inside a
                            drive, so drive scans skip it (it is listed once, under the course's own name, as a copy on that drive)
   progress.rs              SQLite watch progress in <drive>/.courseshelf/progress.sqlite (travels with the disk)
   papers.rs                paper list reader (columns S. No, Title, Link, Local Link, ...), arXiv inbox
