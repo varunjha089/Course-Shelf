@@ -280,6 +280,7 @@ pub fn download(cfg: &crate::config::Config, item: &Single, dir: &Path, on_event
     if ok.is_empty() {
         bail!("nothing was downloaded (see the log)");
     }
+    fetcher::tidy_log(dir, on_event);
     Ok(ok)
 }
 

@@ -60,6 +60,10 @@ In the data folder: `config.toml`, `courses.csv` (you edit these), and what the 
 (downloaded papers), `cache/`. Back this folder up; it is everything that is yours. On each drive: `<drive>/<course>/NNN - Title.mp4` (+ `.info.json`,
 `.en.vtt`) and a hidden `<drive>/.courseshelf/` with `progress.sqlite` (positions and ticks travel with the disk).
 
+After a download (or a move) the folder is tidied: each `.info.json` is cut down to the details CourseShelf reads (from several MB to a few KB), and on
+macOS the `.info.json` and `.vtt` files are marked hidden, so Finder shows only the videos. They stay beside the videos because the app still needs them:
+the subtitles come from the `.vtt`, and your progress is kept under the YouTube id in the `.info.json`. Folders downloaded before this: `courseshelf-fetch tidy`.
+
 ## courses.csv
 
 ```csv
@@ -95,6 +99,7 @@ $F run                               # download what is missing (resumes, skips 
 $F run --only MIT/18.06_Linear_Algebra
 $F prune                             # lectures no longer in `items`: lists them, deletes only if you type yes
 $F home [--set FOLDER]               # show or choose the data folder
+$F tidy [FOLDER...]                  # shrink and hide the .info.json/.vtt side files (every course folder if none given)
 ```
 
 ## The app's tabs

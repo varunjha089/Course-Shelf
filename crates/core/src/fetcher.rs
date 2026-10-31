@@ -330,7 +330,22 @@ pub fn download_course(
             }
         }
     }
+    tidy_log(dir, on_event);
     Ok(res)
+}
+
+/// Shrinks and hides the side files left beside the videos (see `tidy`), and says so in the log.
+pub fn tidy_log(dir: &Path, on_event: &mut dyn FnMut(Event)) {
+    match crate::tidy::tidy(dir) {
+        Ok(r) if r.shrunk > 0 || r.hidden > 0 => on_event(Event::Line(format!(
+            "tidied the folder: {} details file(s) shrunk ({:.1} MB saved), {} side file(s) hidden",
+            r.shrunk,
+            r.bytes_saved as f64 / 1e6,
+            r.hidden
+        ))),
+        Ok(_) => {}
+        Err(e) => on_event(Event::Line(format!("could not tidy the folder: {e:#}"))),
+    }
 }
 
 pub fn write_status(cfg: &Config, results: &[CourseResult]) -> Result<()> {

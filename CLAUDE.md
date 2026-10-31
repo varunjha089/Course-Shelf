@@ -11,7 +11,7 @@ Windows and Linux (`.github/workflows/build.yml`).
 Tabs: **Courses** (watch, resume, ticks, copy to this computer), **Downloads** (yt-dlp downloads, single YouTube links, point / match / move courses, drives),
 **Papers** (a paper list CSV: your own library through `[papers]`, else a starter list in the data folder; question banks, arXiv download to the inbox,
 "make a book", "add papers"), **Books** (PDF viewer with annotations).
-A command-line tool, `courseshelf-fetch` (doctor, home, list, plan, run, prune, import-plans), shares the same core. App version: `app/src-tauri/tauri.conf.json`.
+A command-line tool, `courseshelf-fetch` (doctor, home, list, plan, run, prune, tidy, import-plans), shares the same core. App version: `app/src-tauri/tauri.conf.json`.
 
 **Program and data are separate.** This folder holds only code. Everything of a user's lives in the DATA folder (`config::default_home()`):
 `$COURSESHELF_HOME`, else the folder written in `<settings>/home.txt`, else the settings folder itself (`config::settings_dir()`: macOS
@@ -44,6 +44,9 @@ crates/core/src/           no UI, no HTTP: everything that touches disk or tools
                            home_pointer, ensure_home + STARTER_CONFIG; PapersPaths::starter (no [papers]); in-place edit of a drive's path
   spec.rs, items.rs        courses.csv rows and the `items` syntax (all, 1-5,8, all-2,15)
   library.rs               folder scan: "NNN - Title.mp4" lectures, partial files; a course = a folder with videos, up to 3 levels under a drive
+  tidy.rs                  after a download / single / move: shrink each .info.json to the KEEP fields and set the macOS hidden flag on the
+                           .info.json and .vtt (they stay beside the video, same names: the id keys progress, the .vtt feeds the player).
+                           A field the app starts to read from .info.json MUST be added to KEEP, or tidied folders lose it
   fetcher.rs               yt-dlp: playlist listing (cached 6 h in cache/), download_course, verify_file (ffprobe length + codec)
   singles.rs               saved single YouTube links (singles.json), lookup, download
   adopt.rs, mover.rs       match hand-downloaded files to playlist titles; verified copy-then-delete move between drives

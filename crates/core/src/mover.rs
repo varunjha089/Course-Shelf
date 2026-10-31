@@ -169,6 +169,8 @@ pub fn run(plan: &MovePlan, keep_original: bool, cancel: &AtomicBool, progress: 
         }
         let _ = std::fs::remove_dir(&plan.src); // only succeeds when nothing else is left
     }
+    // a copied file does not keep the hidden flag of its side files
+    let _ = crate::tidy::tidy(&plan.dst);
     Ok(())
 }
 

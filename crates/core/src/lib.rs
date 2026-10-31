@@ -10,6 +10,7 @@ pub mod papers;
 pub mod progress;
 pub mod singles;
 pub mod spec;
+pub mod tidy;
 pub mod tools;
 
 use anyhow::Result;

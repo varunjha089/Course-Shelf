@@ -6,6 +6,7 @@
 //!   courseshelf-fetch run [--only NAME]   download what is missing
 //!   courseshelf-fetch prune               list (and, if you confirm, delete) files no longer in `items`
 //!   courseshelf-fetch import-plans FILE…  build courses.csv from the Video_Course_Plan*.md tables
+//!   courseshelf-fetch tidy [FOLDER…]       shrink and hide the .info.json / .vtt side files (all course folders if none given)
 
 mod importer;
 use courseshelf_core::fetcher as ytdlp;
@@ -59,6 +60,9 @@ enum Cmd {
         #[arg(long)]
         only: Option<String>,
     },
+    /// Shrink each .info.json to what CourseShelf reads and hide the side files, so a course folder shows only its videos.
+    /// Without folders: every course folder on the connected drives and in locations.json. Videos are never touched.
+    Tidy { folders: Vec<PathBuf> },
     /// Build courses.csv from plan markdown files (all rows start disabled).
     ImportPlans {
         files: Vec<PathBuf>,
@@ -93,9 +97,37 @@ fn real_main() -> Result<()> {
         Cmd::Plan { only } => plan(&home, only.as_deref()),
         Cmd::Run { only, force_titles } => run(&home, only.as_deref(), force_titles),
         Cmd::Prune { only } => prune(&home, only.as_deref()),
+        Cmd::Tidy { folders } => tidy(&home, folders),
         Cmd::ImportPlans { files, include_specialised, force } => importer::import(&home, &files, include_specialised, force),
         Cmd::Home { .. } => unreachable!(),
     }
+}
+
+// ---------- tidy ----------
+
+fn tidy(home: &std::path::Path, folders: Vec<PathBuf>) -> Result<()> {
+    let folders = if folders.is_empty() {
+        let cfg = Config::load(home)?;
+        let mut all: Vec<PathBuf> = courseshelf_core::locations::load(home).into_values().filter(|p| p.is_dir()).collect();
+        for d in cfg.drives.iter().filter(|d| d.connected()) {
+            all.extend(library::scan_root(&d.root).into_iter().map(|c| d.root.join(c.course)));
+        }
+        let mut seen = BTreeSet::new();
+        all.retain(|p| seen.insert(p.canonicalize().unwrap_or_else(|_| p.clone())));
+        all
+    } else {
+        folders
+    };
+    let (mut shrunk, mut saved, mut hidden) = (0, 0u64, 0);
+    for dir in &folders {
+        let r = courseshelf_core::tidy::tidy(dir).with_context(|| format!("{}", dir.display()))?;
+        if r.shrunk > 0 || r.hidden > 0 {
+            println!("{}: {} shrunk ({:.1} MB saved), {} hidden", dir.display(), r.shrunk, r.bytes_saved as f64 / 1e6, r.hidden);
+        }
+        (shrunk, saved, hidden) = (shrunk + r.shrunk, saved + r.bytes_saved, hidden + r.hidden);
+    }
+    println!("{} folder(s): {shrunk} details file(s) shrunk, {:.1} MB saved, {hidden} side file(s) hidden", folders.len(), saved as f64 / 1e6);
+    Ok(())
 }
 
 // ---------- shared ----------
