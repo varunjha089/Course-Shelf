@@ -135,8 +135,9 @@ pub fn scan_root(root: &Path) -> Vec<CourseDir> {
         }
         let lectures = scan_folder(e.path());
         if !lectures.is_empty() {
-            let rel = e.path().strip_prefix(root).unwrap().to_string_lossy().to_string();
-            out.push(CourseDir { course: rel, lectures });
+            // course names always use '/', as in courses.csv (Windows paths would give '\\')
+            let rel: Vec<String> = e.path().strip_prefix(root).unwrap().components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+            out.push(CourseDir { course: rel.join("/"), lectures });
         }
     }
     out.sort_by(|a, b| a.course.to_lowercase().cmp(&b.course.to_lowercase()));
