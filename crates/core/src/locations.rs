@@ -46,6 +46,17 @@ pub fn clear(home: &Path, course: &str) -> Result<()> {
     Ok(())
 }
 
+/// `path` relative to `root` ("Provider/Course" for `<root>/Provider/Course`), when it lies inside it; links resolved,
+/// `/` between parts. A drive scan also finds a course whose location is inside that drive: this names that folder,
+/// so it is listed once, under the course's own name.
+pub fn relative_inside(path: &Path, root: &Path) -> Option<String> {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let rel = path.strip_prefix(&root).ok()?;
+    let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +82,18 @@ mod tests {
         assert!(load(&home).is_empty());
         let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn folder_inside_a_drive() {
+        let root = tmp("root");
+        let course = root.join("Extra").join("Provider").join("Course");
+        std::fs::create_dir_all(&course).unwrap();
+        assert_eq!(relative_inside(&course, &root).as_deref(), Some("Extra/Provider/Course"));
+        assert_eq!(relative_inside(&root, &root), None, "the drive itself is not a course folder");
+        let elsewhere = tmp("elsewhere");
+        assert_eq!(relative_inside(&elsewhere, &root), None);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&elsewhere);
     }
 }

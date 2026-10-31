@@ -47,7 +47,8 @@ crates/core/src/           no UI, no HTTP: everything that touches disk or tools
   fetcher.rs               yt-dlp: playlist listing (cached 6 h in cache/), download_course, verify_file (ffprobe length + codec)
   singles.rs               saved single YouTube links (singles.json), lookup, download
   adopt.rs, mover.rs       match hand-downloaded files to playlist titles; verified copy-then-delete move between drives
-  locations.rs             locations.json: a course that lives outside <drive>/<course>
+  locations.rs             locations.json: a course that lives outside <drive>/<course>; relative_inside names such a folder when it lies inside a
+                           drive, so drive scans skip it (it is listed once, under the course's own name, as a copy on that drive)
   progress.rs              SQLite watch progress in <drive>/.courseshelf/progress.sqlite (travels with the disk)
   papers.rs                paper list reader (columns S. No, Title, Link, Local Link, ...), arXiv inbox
   addpapers.rs             "Add papers": parse pasted ids / DOIs, arXiv API + Crossref lookup (curl), append with a backup when there is no add_command;
@@ -155,6 +156,10 @@ This compiles but does not run the Windows tests: the workflow runs them. The ap
 - **Two app copies in Launchpad**: see the install step.
 - **The core did not compile on Windows** (`std::os::unix` in mover.rs, `libc::statvfs` in config.rs) while the README said it did; nothing built it there.
   Fixed with the per-OS code above, and the workflow now builds every OS on each push.
+- **A course listed twice, with its progress split in two**: a course's location (locations.json) pointed INSIDE the Mac drive under another folder name
+  (`<drive>/Extra/Provider/Course`), so the drive scan listed that folder again as an unlisted course, and each entry saved progress to its own database.
+  Now both tabs skip a scanned folder that is a course's location, the location's copy is labelled with the drive it lies in (and as the Mac copy), and
+  `build_state` also reads progress saved under the folder's own name (`CopyRef::alias`). Test: `located_course_inside_a_drive_is_listed_once`.
 - **A single video is not a course until it is inside a drive**: a course is a FOLDER with videos, up to 3 levels under a drive root.
 - yt-dlp: YouTube sometimes answers 429 for subtitles (the lecture is kept); `--embed-subs` needs ffmpeg; VP9/AV1 may not play in the app's video engine,
   so H.264 wins only as a tie-breaker at equal resolution (`-S "res,vcodec:h264,acodec:aac"`).

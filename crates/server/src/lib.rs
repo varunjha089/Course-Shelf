@@ -158,6 +158,9 @@ struct CopyRef {
     overridden: bool,
     is_mac: bool,
     lectures: Vec<library::Lecture>,
+    /// For a location inside a drive: that drive's progress database and the folder's name there. Progress saved while the
+    /// folder was also listed under that name (before the scan skipped it) is still read from there.
+    alias: Option<(PathBuf, String)>,
 }
 
 fn open_progress(state_dir: &Path, connected: bool) -> Option<Progress> {
@@ -185,6 +188,13 @@ fn build_state(home: &Path) -> StateOut {
     };
     let overrides = locations::load(home);
     let mac_name = cfg.mac_drive().map(|d| d.name.clone());
+    // the drive each location lies inside (if any) and its folder name there
+    let inside: std::collections::HashMap<&String, (&courseshelf_core::config::Drive, String)> = overrides
+        .iter()
+        .filter_map(|(course, p)| {
+            cfg.drives.iter().filter(|d| d.connected()).find_map(|d| locations::relative_inside(p, &d.root).map(|rel| (course, (d, rel))))
+        })
+        .collect();
 
     // 1. find every copy of every course, drive by drive
     let mut order: Vec<String> = vec![];
@@ -206,21 +216,33 @@ fn build_state(home: &Path) -> StateOut {
                 order.push(r.course.clone());
             }
             if let Some(p) = overrides.get(&r.course) {
-                copies.entry(r.course.clone()).or_default().push(CopyRef { drive: d.name.clone(), dir: p.clone(), state_dir: p.join(".courseshelf"), connected: p.is_dir(), overridden: true, is_mac: false, lectures: library::scan_folder(p) });
+                // a location inside a drive (e.g. on this Mac) is a copy on that drive
+                let host = inside.get(&r.course);
+                copies.entry(r.course.clone()).or_default().push(CopyRef {
+                    drive: host.map_or_else(|| d.name.clone(), |(h, _)| h.name.clone()),
+                    dir: p.clone(),
+                    state_dir: p.join(".courseshelf"),
+                    connected: p.is_dir(),
+                    overridden: true,
+                    is_mac: host.is_some_and(|(h, _)| mac_name.as_deref() == Some(h.name.as_str())),
+                    lectures: library::scan_folder(p),
+                    alias: host.map(|(h, rel)| (h.state_dir(), rel.clone())),
+                });
             } else if !on_disk.iter().any(|c| c.course == r.course) {
                 // a row always gets an entry, so an unplugged drive still shows its course
-                copies.entry(r.course.clone()).or_default().push(CopyRef { drive: d.name.clone(), dir: d.root.join(&r.course), state_dir: d.state_dir(), connected: d.connected(), overridden: false, is_mac, lectures: vec![] });
+                copies.entry(r.course.clone()).or_default().push(CopyRef { drive: d.name.clone(), dir: d.root.join(&r.course), state_dir: d.state_dir(), connected: d.connected(), overridden: false, is_mac, lectures: vec![], alias: None });
             }
         }
         for c in on_disk {
+            // a course listed under another name through its location: already counted above
+            if overrides.contains_key(&c.course) || inside.values().any(|(h, rel)| h.name == d.name && *rel == c.course) {
+                continue;
+            }
             if !order.contains(&c.course) {
                 order.push(c.course.clone());
             }
-            if overrides.contains_key(&c.course) {
-                continue;
-            }
             let dir = d.root.join(&c.course);
-            copies.entry(c.course.clone()).or_default().push(CopyRef { drive: d.name.clone(), dir, state_dir: d.state_dir(), connected: true, overridden: false, is_mac, lectures: c.lectures });
+            copies.entry(c.course.clone()).or_default().push(CopyRef { drive: d.name.clone(), dir, state_dir: d.state_dir(), connected: true, overridden: false, is_mac, lectures: c.lectures, alias: None });
         }
     }
     out.mac = mac_info(&cfg);
@@ -242,18 +264,24 @@ fn build_state(home: &Path) -> StateOut {
         // watch progress: the newest record from any connected copy wins
         let mut merged: std::collections::HashMap<String, courseshelf_core::progress::Prog> = Default::default();
         let mut speed = 1.0;
-        for (i, c) in cs.iter().enumerate() {
-            let Some(p) = open_progress(&c.state_dir, c.connected) else { continue };
-            if i == active_idx {
-                speed = p.speed(&name);
-            }
-            for (k, v) in p.all(&name).unwrap_or_default() {
+        let mut merge = |records: std::collections::HashMap<String, courseshelf_core::progress::Prog>| {
+            for (k, v) in records {
                 match merged.get(&k) {
                     Some(old) if old.last_watched > v.last_watched => {}
                     _ => {
                         merged.insert(k, v);
                     }
                 }
+            }
+        };
+        for (i, c) in cs.iter().enumerate() {
+            let Some(p) = open_progress(&c.state_dir, c.connected) else { continue };
+            if i == active_idx {
+                speed = p.speed(&name);
+            }
+            merge(p.all(&name).unwrap_or_default());
+            if let Some((old, alias)) = c.alias.as_ref().and_then(|(state_dir, alias)| Some((open_progress(state_dir, true)?, alias))) {
+                merge(old.all(alias).unwrap_or_default());
             }
         }
         let active = &cs[active_idx];
@@ -1081,3 +1109,51 @@ pub fn start_background(home: PathBuf, port: u16, ui_dir: Option<PathBuf>) -> Re
     Ok(Running { port, token })
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A course whose location (locations.json) lies inside another drive's folder, under a different name: it is listed
+    /// once, as a copy on that drive, and progress saved under the folder's own name (the old duplicate entry) still counts.
+    #[test]
+    fn located_course_inside_a_drive_is_listed_once() {
+        let base = std::env::temp_dir().join(format!("cs_state_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (home, root) = (base.join("home"), base.join("mac"));
+        let dir = root.join("Extra").join("Provider").join("Course");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("001 - Lecture 1.mp4"), b"video").unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            format!(
+                "courses_csv = \"courses.csv\"\n[mac]\ndrive = \"local\"\n[drives.local]\npath = {:?}\n[drives.ssd]\npath = {:?}\n",
+                root.to_string_lossy(),
+                base.join("unplugged").to_string_lossy()
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("courses.csv"),
+            "course,playlist_url,items,priority,drive,quality_cap,enabled,note\nProvider/Course,,all,1,ssd,,no,\n",
+        )
+        .unwrap();
+        locations::set(&home, "Provider/Course", &dir).unwrap();
+        // progress written while the folder was also listed as "Extra/Provider/Course" on the Mac drive
+        let old = Progress::open(&root.join(".courseshelf")).unwrap();
+        old.save("Extra/Provider/Course", "001 - Lecture 1", 886.0, 4700.0).unwrap();
+        drop(old);
+
+        let state = build_state(&home);
+        assert!(state.error.is_none(), "{:?}", state.error);
+        let found: Vec<&CourseInfo> = state.courses.iter().filter(|c| c.course.ends_with("Course")).collect();
+        assert_eq!(found.len(), 1, "listed once: {:?}", found.iter().map(|c| &c.course).collect::<Vec<_>>());
+        let c = found[0];
+        assert_eq!(c.course, "Provider/Course");
+        assert_eq!(c.drive, "local");
+        assert!(c.copies[0].is_mac);
+        assert_eq!(c.lectures[0].position, 886.0);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}

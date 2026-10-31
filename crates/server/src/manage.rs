@@ -191,10 +191,13 @@ pub async fn api_overview(State(app): State<Shared>) -> Json<ManageOut> {
                 })
             })
             .collect();
-        // folders found on a connected drive that courses.csv does not mention
+        // folders found on a connected drive that courses.csv does not mention (a course's location inside the drive is
+        // that course, already listed above)
+        let locs = locations::load(&app.home);
         for d in cfg.drives.iter().filter(|d| d.connected()) {
+            let located: Vec<String> = locs.values().filter_map(|p| locations::relative_inside(p, &d.root)).collect();
             for c in library::scan_root(&d.root) {
-                if rows.iter().any(|r| r.course == c.course) {
+                if rows.iter().any(|r| r.course == c.course) || located.contains(&c.course) {
                     continue;
                 }
                 let dir = d.root.join(&c.course);
