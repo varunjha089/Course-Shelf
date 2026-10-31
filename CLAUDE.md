@@ -44,8 +44,10 @@ crates/core/src/           no UI, no HTTP: everything that touches disk or tools
                            home_pointer, ensure_home + STARTER_CONFIG; PapersPaths::starter (no [papers]); in-place edit of a drive's path
   spec.rs, items.rs        courses.csv rows and the `items` syntax (all, 1-5,8, all-2,15)
   library.rs               folder scan: "NNN - Title.mp4" lectures, partial files; a course = a folder with videos, up to 3 levels under a drive
-  tidy.rs                  after a download / single / move: shrink each .info.json to the KEEP fields and set the macOS hidden flag on the
-                           .info.json and .vtt (they stay beside the video, same names: the id keys progress, the .vtt feeds the player).
+  tidy.rs                  after a download / single / move: shrink each .info.json to the KEEP fields and set the hidden flag (macOS chflags,
+                           Windows attribute; none on Linux) on the .info.json and .vtt (they stay beside the video, same names: the id keys
+                           progress, the .vtt feeds the player). course_folders = every reachable course folder. The server tidies each drive the
+                           first time `/api/state` sees it connected (`tidy_new_drives`), and `POST /api/manage/tidy {course}` ("" = all).
                            A field the app starts to read from .info.json MUST be added to KEEP, or tidied folders lose it
   fetcher.rs               yt-dlp: playlist listing (cached 6 h in cache/), download_course, verify_file (ffprobe length + codec)
   singles.rs               saved single YouTube links (singles.json), lookup, download

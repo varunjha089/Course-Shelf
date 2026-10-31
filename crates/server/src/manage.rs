@@ -1162,3 +1162,34 @@ pub async fn api_single_download(State(app): State<Shared>, Json(r): Json<Single
         Err(e) => bad(e),
     }
 }
+
+// ---------- tidy: shrink and hide the side files ----------
+
+#[derive(Deserialize)]
+pub struct TidyReq {
+    /// One course; empty for every course folder that can be reached now.
+    #[serde(default)]
+    course: String,
+}
+
+pub async fn api_tidy(State(app): State<Shared>, Json(r): Json<TidyReq>) -> Response {
+    let res = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
+        let (cfg, rows) = load_all(&app)?;
+        let folders = if r.course.is_empty() {
+            courseshelf_core::tidy::course_folders(&cfg, &app.home, None)
+        } else {
+            vec![resolve_course(&app, &cfg, &rows, &r.course, None)?.dir]
+        };
+        let mut total = courseshelf_core::tidy::Report::default();
+        for dir in folders.iter().filter(|d| d.is_dir()) {
+            total.add(&courseshelf_core::tidy::tidy(dir)?);
+        }
+        Ok(serde_json::json!({ "folders": folders.len(), "shrunk": total.shrunk, "bytes_saved": total.bytes_saved, "hidden": total.hidden }))
+    })
+    .await;
+    match res {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => bad(format!("{e:#}")),
+        Err(e) => err500(anyhow!("{e}")),
+    }
+}

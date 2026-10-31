@@ -342,6 +342,9 @@ export const browse = (path?: string) => getJson<BrowseOut>(`/api/manage/browse$
 export const setDrive = (name: string, path: string, create = false) => post("/api/manage/drive", { name, path, create }) as Promise<{ ok: boolean; path: string }>;
 
 export const macCopy = (course: string) => post("/api/manage/mac/copy", { course }) as Promise<{ job: number }>;
+export interface TidyOut { folders: number; shrunk: number; bytes_saved: number; hidden: number }
+/** shrink each .info.json and hide the side files; course "" = every course folder that can be reached */
+export const tidyFolders = (course = "") => post("/api/manage/tidy", { course }) as Promise<TidyOut>;
 export const macRemove = (course: string) => post("/api/manage/mac/remove", { course }) as Promise<{ removed: number; freed_bytes: number; kept_copy_on: string }>;
 
 // ---------- books and PDF annotations ----------

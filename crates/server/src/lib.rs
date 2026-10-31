@@ -42,6 +42,8 @@ pub struct App {
     /// One download at a time, at least 3 s apart (arXiv asks for polite use).
     dl_gate: Arc<tokio::sync::Mutex<Option<std::time::Instant>>>,
     pub(crate) jobs: Arc<jobs::Jobs>,
+    /// Drive folders already tidied in this run (each is tidied once, the first time it is seen connected).
+    tidied: Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>,
 }
 
 struct PapersCache {
@@ -402,7 +404,29 @@ async fn guard(State(app): State<Shared>, req: Request<Body>, next: Next) -> Res
 
 // ---------- handlers ----------
 
+/// Tidies (see `courseshelf_core::tidy`) the course folders of every drive that is connected and not yet tidied in this run,
+/// in the background: courses downloaded before tidying existed, or on a disk just plugged in.
+fn tidy_new_drives(app: &App) {
+    let Ok(cfg) = Config::load(&app.home) else { return };
+    let fresh: Vec<PathBuf> = {
+        let mut seen = app.tidied.lock().unwrap();
+        cfg.drives.iter().filter(|d| d.connected() && d.root.is_dir()).map(|d| d.root.clone()).filter(|r| seen.insert(r.clone())).collect()
+    };
+    if fresh.is_empty() {
+        return;
+    }
+    let home = app.home.clone();
+    std::thread::spawn(move || {
+        for root in fresh {
+            for dir in courseshelf_core::tidy::course_folders(&cfg, &home, Some(&root)) {
+                let _ = courseshelf_core::tidy::tidy(&dir);
+            }
+        }
+    });
+}
+
 async fn api_state(State(app): State<Shared>) -> Json<StateOut> {
+    tidy_new_drives(&app);
     let home = app.home.clone();
     Json(tokio::task::spawn_blocking(move || build_state(&home)).await.unwrap_or_else(|e| StateOut {
         drives: vec![],
@@ -1056,6 +1080,7 @@ pub fn router(app: Shared) -> Router {
         .route("/api/manage/drive", post(manage::api_drive_set))
         .route("/api/manage/mac/copy", post(manage::api_mac_copy))
         .route("/api/manage/mac/remove", post(manage::api_mac_remove))
+        .route("/api/manage/tidy", post(manage::api_tidy))
         .route("/pdf/paper/{id}", get(pdf_paper))
         .route("/pdf/inbox/{id}", get(pdf_inbox))
         .route("/pdf/bank/{folder}/{pdf}", get(pdf_bank))
@@ -1130,7 +1155,7 @@ pub fn start_background(home: PathBuf, port: u16, ui_dir: Option<PathBuf>) -> Re
                 }
             };
             let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
-            let app = Arc::new(App { home, token: tok, port, ui_dir, papers_cache: Default::default(), dl_gate: Default::default(), jobs: jobs::Jobs::new() });
+            let app = Arc::new(App { home, token: tok, port, ui_dir, papers_cache: Default::default(), dl_gate: Default::default(), jobs: jobs::Jobs::new(), tidied: Default::default() });
             let _ = tx.send(Ok(port));
             let _ = axum::serve(listener, router(app)).await;
         });

@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Single, addSingle, downloadSingle, getSingles, removeSingle, revealSingle, BrowseOut, Course, DEFAULT_SETTINGS, MacInfo, macCopy, macRemove, DlPlan, DriveOut, Job, ManageCourse, ManageState, setDrive, MovePlan, Proposal, adoptApply, adoptPreview, browse, cancelJob, clearLocation, getJobs, getManage, planDownload, planMove, setLocation, startDownload, startMove, Lecture, Paper, PapersState, Settings, State, bankPdfUrl, bookPdfUrl, BooksOut, getBooks, setBookmark, Collection, getCollections, createCollection, addToCollection, renameCollection, reorderCollection, deleteCollection, collectionPdfUrl, openCollection, openBook, downloadPaper, getPapers, inboxPdfUrl, openBank, openExternal, openInbox, openPaper, paperPdfUrl, fmtBytes, fmtHours, fmtTime, getSettings, getState, getSubs, mediaUrl, saveProgress, saveSettings, setDone, setSpeed, LookedUp, LookupOut, NewPaper, addPapers, lookupPapers } from "./api";
+import { TidyOut, tidyFolders, Single, addSingle, downloadSingle, getSingles, removeSingle, revealSingle, BrowseOut, Course, DEFAULT_SETTINGS, MacInfo, macCopy, macRemove, DlPlan, DriveOut, Job, ManageCourse, ManageState, setDrive, MovePlan, Proposal, adoptApply, adoptPreview, browse, cancelJob, clearLocation, getJobs, getManage, planDownload, planMove, setLocation, startDownload, startMove, Lecture, Paper, PapersState, Settings, State, bankPdfUrl, bookPdfUrl, BooksOut, getBooks, setBookmark, Collection, getCollections, createCollection, addToCollection, renameCollection, reorderCollection, deleteCollection, collectionPdfUrl, openCollection, openBook, downloadPaper, getPapers, inboxPdfUrl, openBank, openExternal, openInbox, openPaper, paperPdfUrl, fmtBytes, fmtHours, fmtTime, getSettings, getState, getSubs, mediaUrl, saveProgress, saveSettings, setDone, setSpeed, LookedUp, LookupOut, NewPaper, addPapers, lookupPapers } from "./api";
 import { PdfAnnotator } from "./pdfview";
 
 // ---------- tiny hash router: #/  #/c/<drive>/<course>  #/p/<drive>/<course>/<file> ----------
@@ -1264,6 +1264,7 @@ function CourseManager({ c, drives, busy, onChanged, onJob }: { c: ManageCourse;
           <button className="btn sm primary" onClick={openCheck} disabled={!c.playlist_url} title={c.playlist_url ? "Look up the playlist and see what is missing" : c.listed ? "courses.csv has no playlist_url for this course" : "Add a row with a playlist_url to courses.csv to download more of this course"}>Check &amp; download…</button>
           <button className="btn sm" onClick={() => { reset(); setPanel(panel === "point" ? null : "point"); }} disabled={!c.listed} title={c.listed ? "" : "Needs a row in courses.csv"}>Existing folder…</button>
           <button className="btn sm" onClick={openAdopt} disabled={!c.listed || !c.playlist_url || c.on_disk === 0} title="Number hand-downloaded files by matching their titles to the playlist">Match names…</button>
+          <button className="btn sm" onClick={async () => { reset(); try { setInfo(tidyText(await tidyFolders(c.course))); } catch (e) { fail(e); } }} disabled={c.on_disk === 0} title="Shrink the .info.json files and hide the side files, so the folder shows only the videos">Tidy</button>
           <button className="btn sm primary" onClick={() => { reset(); setPanel(panel === "move" ? null : "move"); setMplan(null); setToFolder(""); setToDrive(""); }} disabled={c.on_disk === 0} title="Move or copy this course to the HDD, the SSD, this Mac or a folder you choose">Move…</button>
         </div>
       </div>
@@ -1474,6 +1475,24 @@ function SinglesPanel({ jobs, onJob }: { jobs: Job[]; onJob: () => void }) {
   );
 }
 
+const tidyText = (r: TidyOut) => r.shrunk === 0 && r.hidden === 0 ? "Already tidy." : `Tidied: ${r.shrunk} details file${r.shrunk === 1 ? "" : "s"} shrunk (${fmtGB(r.bytes_saved)} saved), ${r.hidden} side file${r.hidden === 1 ? "" : "s"} hidden.`;
+
+/** One button that tidies every course folder that can be reached (connected drives and custom folders). */
+function TidyAll() {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const run = async () => {
+    setRunning(true); setMsg(null);
+    try { setMsg(tidyText(await tidyFolders())); } catch (e) { setMsg(String((e as Error).message ?? e)); } finally { setRunning(false); }
+  };
+  return (
+    <div className="controls">
+      <button className="btn sm" onClick={run} disabled={running} title="Shrink each lecture's .info.json and hide the .info.json and .vtt files, so course folders show only the videos. Videos are never touched.">{running ? "Tidying…" : "Tidy all course folders"}</button>
+      {msg && <span className="muted small">{msg}</span>}
+    </div>
+  );
+}
+
 function ManagePage({ onChanged }: { onChanged: () => void }) {
   const [m, setM] = useState<ManageState | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -1517,7 +1536,8 @@ function ManagePage({ onChanged }: { onChanged: () => void }) {
       <SinglesPanel jobs={jobs} onJob={loadJobs} />
 
       <h2>Courses</h2>
-      <p className="muted small">Every course in <code>courses.csv</code> plus any folder of videos found on a connected drive. Use <b>Move…</b> to send a course to the HDD, the SSD or this Mac. Edit <code>courses.csv</code> to add a course, then press Refresh. Pressing “Start download” is the go-ahead, even for a course marked <code>enabled=no</code>.</p>
+      <TidyAll />
+      <p className="muted small">Every course in <code>courses.csv</code> plus any folder of videos found on a connected drive. Use <b>Move…</b> to send a course to the HDD, the SSD, this Mac or a folder you choose. Edit <code>courses.csv</code> to add a course, then press Refresh. Pressing “Start download” is the go-ahead, even for a course marked <code>enabled=no</code>.</p>
       {m.courses.map((c) => <CourseManager key={c.course} c={c} drives={m.drives} busy={busyFor(c.course)} onChanged={refreshAll} onJob={loadJobs} />)}
     </>
   );

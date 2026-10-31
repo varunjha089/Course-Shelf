@@ -107,18 +107,7 @@ fn real_main() -> Result<()> {
 // ---------- tidy ----------
 
 fn tidy(home: &std::path::Path, folders: Vec<PathBuf>) -> Result<()> {
-    let folders = if folders.is_empty() {
-        let cfg = Config::load(home)?;
-        let mut all: Vec<PathBuf> = courseshelf_core::locations::load(home).into_values().filter(|p| p.is_dir()).collect();
-        for d in cfg.drives.iter().filter(|d| d.connected()) {
-            all.extend(library::scan_root(&d.root).into_iter().map(|c| d.root.join(c.course)));
-        }
-        let mut seen = BTreeSet::new();
-        all.retain(|p| seen.insert(p.canonicalize().unwrap_or_else(|_| p.clone())));
-        all
-    } else {
-        folders
-    };
+    let folders = if folders.is_empty() { courseshelf_core::tidy::course_folders(&Config::load(home)?, home, None) } else { folders };
     let (mut shrunk, mut saved, mut hidden) = (0, 0u64, 0);
     for dir in &folders {
         let r = courseshelf_core::tidy::tidy(dir).with_context(|| format!("{}", dir.display()))?;

@@ -60,9 +60,11 @@ In the data folder: `config.toml`, `courses.csv` (you edit these), and what the 
 (downloaded papers), `cache/`. Back this folder up; it is everything that is yours. On each drive: `<drive>/<course>/NNN - Title.mp4` (+ `.info.json`,
 `.en.vtt`) and a hidden `<drive>/.courseshelf/` with `progress.sqlite` (positions and ticks travel with the disk).
 
-After a download (or a move) the folder is tidied: each `.info.json` is cut down to the details CourseShelf reads (from several MB to a few KB), and on
-macOS the `.info.json` and `.vtt` files are marked hidden, so Finder shows only the videos. They stay beside the videos because the app still needs them:
-the subtitles come from the `.vtt`, and your progress is kept under the YouTube id in the `.info.json`. Folders downloaded before this: `courseshelf-fetch tidy`.
+After a download (or a move) the folder is tidied: each `.info.json` is cut down to the details CourseShelf reads (from several MB to a few KB), and the
+`.info.json` and `.vtt` files are marked hidden (Finder on macOS, File Explorer on Windows; Linux shows them), so the folder shows only the videos. They stay
+beside the videos because the app still needs them: the subtitles come from the `.vtt`, and your progress is kept under the YouTube id in the `.info.json`.
+Older folders are tidied when the app first sees their drive connected, with **Tidy** / **Tidy all course folders** on the Downloads tab, or with
+`courseshelf-fetch tidy`.
 
 ## courses.csv
 

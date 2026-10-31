@@ -2,14 +2,15 @@
 //! caption languages) and `.vtt` subtitles beside each video. Both are still needed (the YouTube id in `.info.json` keys
 //! the watch progress; the player shows the `.vtt`), so they stay where they are, under the same names. Tidying
 //! - shrinks each `.info.json` to the fields CourseShelf reads plus a few that describe the lecture, and
-//! - marks the side files hidden (macOS: the Finder "hidden" flag), so the folder shows only the videos.
+//! - marks the side files hidden (the Finder hidden flag on macOS, the hidden attribute on Windows), so the folder shows only the videos.
 //!
 //! Nothing else is touched: videos, partial downloads and files that do not belong to a video stay as they are.
 
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::library;
+use crate::config::Config;
+use crate::{library, locations};
 
 /// Fields kept in a shrunk `.info.json`. `id`, `title`, `duration`, `width`, `height` and `vcodec` are read by
 /// `library::scan_folder` and `fetcher::verify_file`; the rest describe the lecture for a person reading the file.
@@ -37,8 +38,31 @@ pub struct Report {
     pub shrunk: usize,
     /// Bytes saved by shrinking.
     pub bytes_saved: u64,
-    /// Side files marked hidden (0 where the system has no hidden flag).
+    /// Side files newly marked hidden (0 where the system has no hidden flag, or when they already were).
     pub hidden: usize,
+}
+
+impl Report {
+    pub fn add(&mut self, other: &Report) {
+        self.shrunk += other.shrunk;
+        self.bytes_saved += other.bytes_saved;
+        self.hidden += other.hidden;
+    }
+}
+
+/// Every course folder that can be reached now: each course's own folder (locations.json) and every folder with videos on a
+/// connected drive (up to 3 levels deep), each once. `only_root` limits it to folders inside that drive folder.
+pub fn course_folders(cfg: &Config, home: &Path, only_root: Option<&Path>) -> Vec<PathBuf> {
+    let mut all: Vec<PathBuf> = locations::load(home).into_values().filter(|p| p.is_dir()).collect();
+    for d in cfg.drives.iter().filter(|d| d.connected() && d.root.is_dir()) {
+        all.extend(library::scan_root(&d.root).into_iter().map(|c| d.root.join(c.course)));
+    }
+    if let Some(root) = only_root {
+        all.retain(|p| locations::relative_inside(p, root).is_some());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    all.retain(|p| seen.insert(p.canonicalize().unwrap_or_else(|_| p.clone())));
+    all
 }
 
 /// Tidies the side files of every video in `dir` (not recursive). Safe to run again: a shrunk file stays as it is.
@@ -83,7 +107,7 @@ fn shrink(path: &Path) -> Result<Option<u64>> {
     Ok(Some((text.len() as u64).saturating_sub(new.len() as u64)))
 }
 
-/// Sets the Finder's hidden flag. Returns whether the file is hidden now.
+/// Sets the Finder's hidden flag. Returns whether it was set now (false if it already was, or could not be).
 #[cfg(target_os = "macos")]
 fn hide(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
@@ -94,14 +118,28 @@ fn hide(path: &Path) -> bool {
         return false;
     }
     if st.st_flags & libc::UF_HIDDEN != 0 {
-        return true;
+        return false;
     }
     // SAFETY: as above; chflags only changes the file's flags.
     unsafe { libc::chflags(c.as_ptr(), st.st_flags | libc::UF_HIDDEN) == 0 }
 }
 
-/// Other systems have no hidden flag that the file managers honour for ordinary names; the files stay visible.
-#[cfg(not(target_os = "macos"))]
+/// Sets the Windows "hidden" attribute (File Explorer hides such files unless "Hidden items" is on). Returns whether it was set now.
+#[cfg(windows)]
+fn hide(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{GetFileAttributesW, SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, INVALID_FILE_ATTRIBUTES};
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives both calls.
+    let attrs = unsafe { GetFileAttributesW(wide.as_ptr()) };
+    if attrs == INVALID_FILE_ATTRIBUTES {
+        return false;
+    }
+    attrs & FILE_ATTRIBUTE_HIDDEN == 0 && unsafe { SetFileAttributesW(wide.as_ptr(), attrs | FILE_ATTRIBUTE_HIDDEN) } != 0
+}
+
+/// Linux file managers hide only names that start with a dot, and renaming would break the app's lookups: the files stay visible.
+#[cfg(not(any(target_os = "macos", windows)))]
 fn hide(_path: &Path) -> bool {
     false
 }
@@ -139,7 +177,7 @@ mod tests {
         let after = library::scan_folder(&d);
         assert_eq!((&after[0].key, after[0].duration, &after[0].subs), (&before[0].key, before[0].duration, &before[0].subs));
         assert_eq!(after[0].key, "abc123");
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", windows)) {
             assert_eq!(r.hidden, 2, "the .info.json and the .vtt");
         }
         assert_eq!(std::fs::read_to_string(d.join("notes.txt")).unwrap(), "mine");
@@ -147,7 +185,7 @@ mod tests {
 
         // running again changes nothing
         let again = tidy(&d).unwrap();
-        assert_eq!((again.shrunk, again.bytes_saved), (0, 0));
+        assert_eq!(again, Report::default(), "nothing left to do");
         let _ = std::fs::remove_dir_all(&d);
     }
 
