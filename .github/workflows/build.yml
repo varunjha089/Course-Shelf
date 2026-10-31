@@ -1,5 +1,7 @@
 # Build and test CourseShelf on macOS, Windows and Linux for every push and pull request, and keep the built app as a
 # download (Actions -> the run -> Artifacts). The builds are not signed: see "Ready-made builds" in README.md.
+# For a tag vX.Y.Z (or a manual run given a tag), the "release" job attaches the installers to that GitHub release, which
+# is where the app's self-update looks (crates/core/src/update.rs, pick_asset: *_aarch64.app.zip, *_x64-setup.exe, *_amd64.deb).
 name: Build
 
 on:
@@ -8,6 +10,10 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Attach the installers to this existing release tag (vX.Y.Z); its version must match the code on the branch"
+        required: false
 
 concurrency:
   group: build-${{ github.ref }}
@@ -73,7 +79,8 @@ jobs:
         run: |
           mkdir out
           case "$RUNNER_OS" in
-            macOS)   ditto -c -k --keepParent target/release/bundle/macos/CourseShelf.app out/CourseShelf-macOS.app.zip
+            macOS)   version=$(sed -n 's/^ *"version": *"\(.*\)",*$/\1/p' app/src-tauri/tauri.conf.json)
+                     ditto -c -k --keepParent target/release/bundle/macos/CourseShelf.app "out/CourseShelf_${version}_aarch64.app.zip"
                      cp target/release/courseshelf-fetch out/ ;;
             Windows) cp target/release/bundle/nsis/*.exe out/
                      cp target/release/courseshelf-fetch.exe out/ ;;
@@ -87,3 +94,32 @@ jobs:
           name: CourseShelf-${{ matrix.name }}
           path: out/
           if-no-files-found: error
+
+  release:
+    name: Attach installers to the release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Upload to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version=$(jq -r .version app/src-tauri/tauri.conf.json)
+          if [ "v$version" != "$TAG" ]; then
+            echo "the code is version $version but the tag is $TAG"; exit 1
+          fi
+          # a release made by hand keeps its notes; otherwise make one (published, so releases/latest and the app see it)
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "CourseShelf $version" --generate-notes
+          ls -l dist
+          gh release upload "$TAG" --clobber dist/*.app.zip dist/*-setup.exe dist/*.deb
