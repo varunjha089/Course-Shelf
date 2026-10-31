@@ -15,6 +15,8 @@ mod annot;
 mod collections;
 mod jobs;
 mod manage;
+mod moving;
+mod singles_api;
 
 use courseshelf_core::{addpapers, config::Config, library, locations, papers, progress::Progress, spec};
 use rust_embed::RustEmbed;
@@ -1070,16 +1072,16 @@ pub fn router(app: Shared) -> Router {
         .route("/api/manage/location/clear", post(manage::api_location_clear))
         .route("/api/manage/adopt/preview", post(manage::api_adopt_preview))
         .route("/api/manage/adopt/apply", post(manage::api_adopt_apply))
-        .route("/api/manage/move/plan", post(manage::api_move_plan))
-        .route("/api/manage/move/start", post(manage::api_move_start))
+        .route("/api/manage/move/plan", post(moving::api_move_plan))
+        .route("/api/manage/move/start", post(moving::api_move_start))
         .route("/api/manage/browse", get(manage::api_browse))
-        .route("/api/singles", get(manage::api_singles))
-        .route("/api/singles/add", post(manage::api_single_add))
-        .route("/api/singles/remove", post(manage::api_single_remove))
-        .route("/api/singles/download", post(manage::api_single_download))
+        .route("/api/singles", get(singles_api::api_singles))
+        .route("/api/singles/add", post(singles_api::api_single_add))
+        .route("/api/singles/remove", post(singles_api::api_single_remove))
+        .route("/api/singles/download", post(singles_api::api_single_download))
         .route("/api/manage/drive", post(manage::api_drive_set))
-        .route("/api/manage/mac/copy", post(manage::api_mac_copy))
-        .route("/api/manage/mac/remove", post(manage::api_mac_remove))
+        .route("/api/manage/mac/copy", post(moving::api_mac_copy))
+        .route("/api/manage/mac/remove", post(moving::api_mac_remove))
         .route("/api/manage/tidy", post(manage::api_tidy))
         .route("/pdf/paper/{id}", get(pdf_paper))
         .route("/pdf/inbox/{id}", get(pdf_inbox))

@@ -63,7 +63,10 @@ crates/core/src/           no UI, no HTTP: everything that touches disk or tools
                            launch tools through tools::command; tools::open opens or reveals a file (open / explorer / xdg-open), never call `open` directly
 crates/server/src/
   lib.rs                   axum server on 127.0.0.1 (random port), cookie token, Host check, routes, video streaming with Range
-  manage.rs                Downloads-tab endpoints (overview incl. the data folder, plan, download, jobs, adopt, move, drives, browse, singles).
+  manage.rs                Downloads-tab endpoints (overview incl. the data folder, plan, download, jobs, adopt, drives, browse, tidy) and the
+                           helpers the other two share (`bad`, `load_all`, `resolve_course`, `exact_located`, `nice`)
+  moving.rs                move to a drive or a chosen folder; copy to / remove from this Mac
+  singles_api.rs           single YouTube links (save, download).
                            Download places: `dest_root` = a drive's folder (course goes to <root>/<course>), `dest_folder` = exactly that folder
                            (`exact_located`); moves take `to_drive` or `to_folder` the same way. A place other than <csv drive>/<course> is
                            recorded in locations.json (and the course's progress moves to <folder>/.courseshelf); the usual place clears it.
@@ -73,7 +76,9 @@ crates/server/src/
   collections.rs           books joined from papers (pdfunite), missing papers downloaded first, rename / reorder / delete
   main.rs                  courseshelf-serve: the server alone, for a browser or tests
 crates/fetch/src/          courseshelf-fetch (main.rs) and import-plans (importer.rs: provider = first word of the heading)
-web/                       React + Vite + TypeScript: src/App.tsx (all pages, hash router at the top), api.ts (typed calls), annotmodel.ts, styles.css; public/pdfjs
+web/                       React + Vite + TypeScript, one file per tab: src/App.tsx (the shell: header, tabs, routes), nav.ts (hash router, links),
+                           courses.tsx (Courses tab, course page, player), papers.tsx (Papers, Books, PDF page), manage.tsx (Downloads tab: FolderPicker,
+                           CourseManager, drives, singles, jobs, tidy); api.ts (typed calls), annotmodel.ts, styles.css; public/pdfjs
   src/pdfview.tsx          the PDF viewer: toolbar, ONE keydown handler for every key (tools g v p h e r o l a t, [ ] width, +/- zoom, \ side panel),
                            side panel (Contents / Notes / Bookmarks / Search; folds to a strip), Fit width follows the scroller's size (ResizeObserver)
 app/src-tauri/             Tauri shell (identifier io.github.courseshelf): calls ensure_home, starts the server in-process, opens the window
@@ -94,7 +99,7 @@ examples/                  config.toml, courses.csv, course_plan.md: what a new 
 
 1. `git status`. 2. Logic + unit tests in `crates/core`. 3. An endpoint in `crates/server/src/manage.rs` (or `lib.rs`) and its route; long work as a job
 (`app.jobs.submit(JobInfo{kind, ..}, Box::new(move |ctx| ...))`, using `ctx.update` / `ctx.log` and honouring `ctx.cancel`). 4. A typed call in `web/src/api.ts`, the UI in
-`web/src/App.tsx` (reuse `FolderPicker`, `JobCard`, `.panel` / `.controls` / `.btn`); a new job kind also extends `Job["kind"]` and `JobCard`. 5. A new setting goes into
+the tab's file in `web/src/` (reuse `FolderPicker`, `JobCard` from manage.tsx, `.panel` / `.controls` / `.btn`); a new job kind also extends `Job["kind"]` and `JobCard`. 5. A new setting goes into
 `config.rs` with a default, into `STARTER_CONFIG` (commented if optional) and `examples/config.toml`. 6. Test (below), update `README.md`, commit.
 7. Report what was checked and what was NOT (a real YouTube download, a real external disk and the packaged window are the usual gaps).
 
