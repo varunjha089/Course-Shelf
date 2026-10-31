@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "courseshelf-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "courseshelf-core",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "courseshelf-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "csv",
@@ -572,6 +572,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "toml 1.1.8+spec-1.1.0",
  "walkdir",
  "windows-sys 0.61.2",
@@ -579,7 +580,7 @@ dependencies = [
 
 [[package]]
 name = "courseshelf-fetch"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -591,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "courseshelf-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",

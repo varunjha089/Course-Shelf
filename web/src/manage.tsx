@@ -1,3 +1,4 @@
+import { checkForUpdatesNow } from "./update";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TidyOut, tidyFolders, Single, addSingle, downloadSingle, getSingles, removeSingle, revealSingle, BrowseOut, DlPlan, DriveOut, Job, ManageCourse, ManageState, setDrive, MovePlan, Proposal, adoptApply, adoptPreview, browse, cancelJob, clearLocation, getJobs, getManage, planDownload, planMove, setLocation, startDownload, startMove, openExternal, fmtTime } from "./api";
 
@@ -12,7 +13,7 @@ export function JobCard({ j, onCancel }: { j: Job; onCancel: (id: number) => voi
   return (
     <div className={`job ${j.status}`}>
       <div className="jobhead">
-        <b>{j.kind === "download" ? "Download" : j.kind === "single" ? "Video" : j.kind === "collection" ? "Book" : j.kind === "addpapers" ? "Papers" : "Move"}: {j.title}</b>
+        <b>{j.kind === "download" ? "Download" : j.kind === "single" ? "Video" : j.kind === "collection" ? "Book" : j.kind === "addpapers" ? "Papers" : j.kind === "update" ? "Update" : "Move"}: {j.title}</b>
         <span className={`badge ${j.status === "done" ? "ok" : j.status === "failed" ? "bad" : j.status === "cancelled" ? "" : "info"}`}>{j.status}</span>
         <span className="spacer" />
         {active && <button className="btn sm" onClick={() => onCancel(j.id)}>Cancel</button>}
@@ -416,6 +417,7 @@ export function ManagePage({ onChanged }: { onChanged: () => void }) {
       <p className="muted">
         {m.ytdlp ? <>yt-dlp {m.ytdlp}</> : <span style={{ color: "var(--bad)" }}>yt-dlp was not found on this Mac, so downloading is unavailable (watching and moving still work).</span>}
       </p>
+      <p className="muted small">CourseShelf {m.version} · <button className="btn sm" onClick={checkForUpdatesNow}>Check for updates</button></p>
       {m.home && <p className="muted small">Your data folder (config.toml, courses.csv, annotations, books): <code>{m.home}</code></p>}
 
       <DrivesPanel drives={m.drives} onChanged={refreshAll} />

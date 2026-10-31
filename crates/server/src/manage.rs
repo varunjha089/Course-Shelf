@@ -118,6 +118,8 @@ pub(crate) struct DriveOut {
 
 #[derive(Serialize)]
 pub(crate) struct ManageOut {
+    /// This build's version (the update check compares against it).
+    version: &'static str,
     mac: Option<crate::MacInfo>,
     courses: Vec<ManageCourse>,
     drives: Vec<DriveOut>,
@@ -137,7 +139,7 @@ pub async fn api_overview(State(app): State<Shared>) -> Json<ManageOut> {
         let home = app.home.to_string_lossy().to_string();
         let (cfg, rows) = match load_all(&app) {
             Ok(x) => x,
-            Err(e) => return ManageOut { mac: None, courses: vec![], drives: vec![], ytdlp, home, error: Some(format!("{e:#}")) },
+            Err(e) => return ManageOut { version: crate::update_api::VERSION, mac: None, courses: vec![], drives: vec![], ytdlp, home, error: Some(format!("{e:#}")) },
         };
         let drives: Vec<DriveOut> = cfg
             .drives
@@ -212,10 +214,10 @@ pub async fn api_overview(State(app): State<Shared>) -> Json<ManageOut> {
                 });
             }
         }
-        ManageOut { mac: crate::mac_info(&cfg), courses, drives, ytdlp, home, error: None }
+        ManageOut { version: crate::update_api::VERSION, mac: crate::mac_info(&cfg), courses, drives, ytdlp, home, error: None }
     })
     .await;
-    Json(r.unwrap_or(ManageOut { mac: None, courses: vec![], drives: vec![], ytdlp: None, home: String::new(), error: Some("internal error".into()) }))
+    Json(r.unwrap_or(ManageOut { version: crate::update_api::VERSION, mac: None, courses: vec![], drives: vec![], ytdlp: None, home: String::new(), error: Some("internal error".into()) }))
 }
 
 // ---------- drives: change where a drive's folder is ----------

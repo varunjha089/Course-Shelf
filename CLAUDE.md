@@ -203,12 +203,22 @@ An unplugged disk shows "not connected"; never create folders on a missing disk 
 - This folder is the repository (`main`, remote `origin`). Commit after every checked change with a message that says what and why (attribution lines of the session
   at the end). Push to `origin` after every change that is verified (tests pass, the new commits scanned clean): the owner asked for this on 2026-10-24; push `main` only; never rewrite pushed history. Scan new commits for personal paths and data before a push.
 - Tracked: `crates/`, `app/` (without `node_modules`), `web/src`, `web/public`, `examples/`, README, CLAUDE.md, LICENSE. Never: build output, `node_modules`, user data, `*.local.md`.
-- A release: raise `version` in `app/src-tauri/tauri.conf.json`, describe it in `README.md`, run the fresh-clone test, commit, tag `vX.Y.Z`.
-- **GitHub Actions** (`.github/workflows/build.yml`): on every push to `main`, tag `v*`, pull request or manual run, on macOS, Windows and Linux: `npm ci`, `tsc`,
+- **A release** (the app updates itself from these; `core/update.rs`, `server/update_api.rs`, `web/src/update.tsx`):
+  1. Raise the version in ALL of: the five `Cargo.toml` (`[workspace.package]`, core, fetch, server, app/src-tauri; plus the `courseshelf-core = { version }`
+     pins in fetch and server) and `app/src-tauri/tauri.conf.json`. `version_matches_the_app` fails if they differ. Commit, push.
+  2. Tag `vX.Y.Z`, push the tag.
+  3. Build the Mac app and zip it: `ditto -c -k --keepParent target/release/bundle/macos/CourseShelf.app CourseShelf_X.Y.Z_aarch64.app.zip`. The name
+     must end in `.app.zip` and contain the arch (`update::pick_asset`); Windows `*_x64-setup.exe`, Linux `*_amd64.deb` (Tauri's names) when built.
+  4. Create the release through the API (token header file, see CLAUDE.local.md) with the notes as `body`, then upload the zip to
+     `uploads.github.com/repos/<repo>/releases/<id>/assets?name=...`. Published (not draft): `releases/latest` must show it.
+  5. Check: `curl https://api.github.com/repos/<repo>/releases/latest` lists the asset with a `digest`.
+  Test an update without GitHub: `COURSESHELF_UPDATE_URL=http://127.0.0.1:<port>/latest.json` (a local `python3 -m http.server` serving a release
+  JSON and a zip of a higher version) on a scratch copy of the app started with a scratch `COURSESHELF_HOME`; never press Restart there (it reopens
+  the app on the real data folder).
+- **GitHub Actions** (`.github/workflows/build.yml`, not on GitHub yet: pushing it needs a token with the `workflow` scope): on every push to `main`, tag `v*`, pull request or manual run, on macOS, Windows and Linux: `npm ci`, `tsc`,
   UI build, `cargo test --workspace --exclude courseshelf-app`, the release downloader, `npx tauri build --bundles app|nsis|deb`; the app and downloader are
   kept as run artifacts `CourseShelf-<OS>` (unsigned). Linux needs the webkit2gtk-4.1 / GTK packages installed in the workflow. Look at the run after a push
   (`/repos/.../actions/runs?branch=main`, read with the token header file); a red run is a broken change. Pushing a change to a file in `.github/workflows/`
   needs a token with the `workflow` scope (a `repo`-only token is refused).
-- There is no self-updater or GitHub Release yet: users build from source or take a run's artifacts. The plan (like The Data Application's updater, VLC-style):
-  Tauri's updater plugin, a signing key pair (the private key as a repository secret), and a release job in the workflow that publishes a signed release for each
-  tag; the app checks `releases/latest` and offers Install and restart.
+- The updater is our own (curl + SHA-256 from GitHub's `digest`), not Tauri's plugin, so no signing key or workflow secret is needed. A release job in the
+  workflow (Windows/Linux installers attached to each tag) needs the workflow on GitHub first, which needs a token with the `workflow` scope.

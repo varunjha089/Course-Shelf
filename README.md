@@ -33,11 +33,15 @@ Nothing in the app touches the network unless you press a download button; nothi
    Copy `CourseShelf.app` to /Applications (keep only one copy, or Launchpad shows two). On Windows build the installer with
    `npx tauri build --bundles nsis` (in `target\release\bundle\nsis\`), on Linux a package with `npx tauri build --bundles deb`.
 
-   **Ready-made builds:** every push to `main` is built and tested on macOS, Windows and Linux by GitHub Actions
-   (`.github/workflows/build.yml`). Open the latest green run under [Actions](https://github.com/varunjha089/Course-Shelf/actions) and download
-   `CourseShelf-macOS`, `CourseShelf-Windows` or `CourseShelf-Linux` (signed in to GitHub). They are **not signed**: macOS says the app "cannot be
-   opened" (right-click it, Open, then Open again, or run `xattr -dr com.apple.quarantine CourseShelf.app`), and Windows SmartScreen asks you to
-   confirm (More info, Run anyway).
+   **Ready-made builds:** download the latest from [Releases](https://github.com/varunjha089/Course-Shelf/releases/latest): today a macOS
+   (Apple silicon) app, `CourseShelf_<version>_aarch64.app.zip`; Windows and Linux installers will follow. They are **not signed**: macOS says the
+   app "cannot be opened" (right-click it, Open, then Open again, or run `xattr -dr com.apple.quarantine CourseShelf.app`), and Windows SmartScreen
+   asks you to confirm (More info, Run anyway).
+
+   **Updates:** when a newer release is published, the app shows "CourseShelf X is available" with **Install and restart** (it checks once each time
+   it opens; the Downloads tab has **Check for updates**). On a Mac it replaces the app and restarts it; on Windows it runs the new installer; on
+   Linux it opens the new `.deb`. The download is checked against the size and SHA-256 GitHub lists, and only the program is replaced: your data
+   folder and drives are never touched.
 3. **First start** makes your **data folder** with a starter `config.toml` and an empty `courses.csv`. Nothing of yours is ever kept in the program
    folder, so you can update or move the program freely.
 4. Edit `config.toml` (your drives: the folders that hold courses), add courses to `courses.csv`, then `courseshelf-fetch plan` and `courseshelf-fetch run`,

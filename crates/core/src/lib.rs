@@ -12,6 +12,7 @@ pub mod singles;
 pub mod spec;
 pub mod tidy;
 pub mod tools;
+pub mod update;
 
 use anyhow::Result;
 use std::io::Read;

@@ -242,6 +242,8 @@ export interface DriveOut {
 }
 
 export interface ManageState {
+  /** this build's version */
+  version: string;
   courses: ManageCourse[];
   drives: DriveOut[];
   ytdlp: string | null;
@@ -251,7 +253,7 @@ export interface ManageState {
 
 export interface Job {
   id: number;
-  kind: "download" | "move" | "single" | "collection" | "addpapers";
+  kind: "download" | "move" | "single" | "collection" | "addpapers" | "update";
   course: string;
   drive: string;
   title: string;
@@ -342,6 +344,15 @@ export const browse = (path?: string) => getJson<BrowseOut>(`/api/manage/browse$
 export const setDrive = (name: string, path: string, create = false) => post("/api/manage/drive", { name, path, create }) as Promise<{ ok: boolean; path: string }>;
 
 export const macCopy = (course: string) => post("/api/manage/mac/copy", { course }) as Promise<{ job: number }>;
+export interface UpdateCheck {
+  current: string;
+  /** the newer published version, or null when this copy is up to date */
+  release: { version: string; tag: string; notes: string; page: string; asset: { name: string; size: number } | null } | null;
+}
+export const checkUpdate = () => getJson<UpdateCheck>("/api/update");
+export const installUpdate = () => post("/api/update/install", {}) as Promise<{ job: number }>;
+export const restartForUpdate = () => post("/api/update/restart", {}) as Promise<{ restarting: boolean }>;
+
 export interface TidyOut { folders: number; shrunk: number; bytes_saved: number; hidden: number }
 /** shrink each .info.json and hide the side files; course "" = every course folder that can be reached */
 export const tidyFolders = (course = "") => post("/api/manage/tidy", { course }) as Promise<TidyOut>;

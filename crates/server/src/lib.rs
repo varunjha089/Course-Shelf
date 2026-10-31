@@ -17,6 +17,7 @@ mod jobs;
 mod manage;
 mod moving;
 mod singles_api;
+mod update_api;
 
 use courseshelf_core::{addpapers, config::Config, library, locations, papers, progress::Progress, spec};
 use rust_embed::RustEmbed;
@@ -46,6 +47,8 @@ pub struct App {
     pub(crate) jobs: Arc<jobs::Jobs>,
     /// Drive folders already tidied in this run (each is tidied once, the first time it is seen connected).
     tidied: Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>,
+    /// An installed update waiting to start (see update_api).
+    restart: Arc<std::sync::Mutex<Option<courseshelf_core::update::Restart>>>,
 }
 
 struct PapersCache {
@@ -1083,6 +1086,9 @@ pub fn router(app: Shared) -> Router {
         .route("/api/manage/mac/copy", post(moving::api_mac_copy))
         .route("/api/manage/mac/remove", post(moving::api_mac_remove))
         .route("/api/manage/tidy", post(manage::api_tidy))
+        .route("/api/update", get(update_api::api_check))
+        .route("/api/update/install", post(update_api::api_install))
+        .route("/api/update/restart", post(update_api::api_restart))
         .route("/pdf/paper/{id}", get(pdf_paper))
         .route("/pdf/inbox/{id}", get(pdf_inbox))
         .route("/pdf/bank/{folder}/{pdf}", get(pdf_bank))
@@ -1157,7 +1163,7 @@ pub fn start_background(home: PathBuf, port: u16, ui_dir: Option<PathBuf>) -> Re
                 }
             };
             let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
-            let app = Arc::new(App { home, token: tok, port, ui_dir, papers_cache: Default::default(), dl_gate: Default::default(), jobs: jobs::Jobs::new(), tidied: Default::default() });
+            let app = Arc::new(App { home, token: tok, port, ui_dir, papers_cache: Default::default(), dl_gate: Default::default(), jobs: jobs::Jobs::new(), tidied: Default::default(), restart: Default::default() });
             let _ = tx.send(Ok(port));
             let _ = axum::serve(listener, router(app)).await;
         });
@@ -1261,6 +1267,7 @@ mod tests {
             dl_gate: Default::default(),
             jobs: jobs::Jobs::new(),
             tidied: Default::default(),
+            restart: Default::default(),
         });
         Scratch { base, app }
     }
@@ -1278,6 +1285,13 @@ mod tests {
         let status = resp.status();
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         (status, serde_json::from_slice(&bytes).unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&bytes).into())))
+    }
+
+    /// The update check compares against this number, so it must be the app's version too.
+    #[test]
+    fn version_matches_the_app() {
+        let conf: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../app/src-tauri/tauri.conf.json")).unwrap()).unwrap();
+        assert_eq!(conf["version"].as_str(), Some(update_api::VERSION), "raise the version in every Cargo.toml and tauri.conf.json together");
     }
 
     #[tokio::test]

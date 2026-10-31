@@ -9,7 +9,7 @@ use std::sync::{
 #[derive(Serialize, Clone, Default, Debug)]
 pub struct JobInfo {
     pub id: u64,
-    /// "download" | "move"
+    /// "download" | "move" | "single" | "collection" | "addpapers" | "update"
     pub kind: String,
     pub course: String,
     pub drive: String,

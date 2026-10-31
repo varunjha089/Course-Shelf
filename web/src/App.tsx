@@ -4,6 +4,7 @@ import { useRoute } from "./nav";
 import { CoursePage, Home, PlayPage } from "./courses";
 import { BooksPage, PapersPage, PdfPage } from "./papers";
 import { ManagePage } from "./manage";
+import { UpdateBanner } from "./update";
 
 // ---------- app shell ----------
 
@@ -99,6 +100,7 @@ export default function App() {
         <button className="btn" onClick={refresh} title="Re-read the drives and courses.csv">Refresh</button>
       </header>
       <main className={route.page === "pdf" ? "wide" : undefined}>
+        <UpdateBanner />
         {error && <div className="banner">{error}</div>}
         {state?.error && <div className="banner">{state.error}</div>}
         {(!state || !settingsLoaded) && !error && <p className="muted">Loading…</p>}
