@@ -81,12 +81,13 @@ MIT/18.06_Linear_Algebra,https://www.youtube.com/playlist?list=…,"1-10,12",1,l
 |---|---|
 | `course` | Folder on the drive. One slash level allowed: `MIT/Linear_Algebra_18_06`. |
 | `playlist_url` | YouTube playlist. |
-| `items` | Playlist positions: `all`, `1-5,8`, or `all-2,15` (everything except). |
+| `items` | Lecture numbers (playlist positions, or counted from the end with `order = reverse`): `all`, `1-5,8`, or `all-2,15` (everything except). |
 | `priority` | Lower = downloaded first, and kept first when a drive's budget runs out. |
 | `drive` | A drive name from `config.toml` (for example `local`, `hdd`). |
 | `quality_cap` | Blank = best available. A number such as `720` caps the height. |
 | `enabled` | `yes` / `no`. `no` keeps the row but skips it in `run`. |
 | `note` | Free text. |
+| `order` | Optional column. `reverse` for a playlist that lists the newest lecture first: the last video becomes lecture 1, files are numbered that way, and lectures added later to the top of the playlist keep the old numbers. Blank = playlist order. |
 
 Lines starting with `#` are comments. Changing the CSV and running again downloads only what is missing. Removing items never deletes anything by itself.
 `courseshelf-fetch import-plans PLAN.md…` builds `courses.csv` from markdown plan files: a `## Provider Course title` heading per course, a

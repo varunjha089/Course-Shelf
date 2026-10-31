@@ -279,7 +279,7 @@ fn build_todos<'a>(ctx: &'a Ctx, home: &std::path::Path) -> Result<Vec<Todo<'a>>
         let loc = locate(&ctx.cfg, home, row)?;
         let drive = host_drive(&ctx.cfg, row, &loc)?;
         let dir = loc.dir;
-        let pl = match ytdlp::playlist(home, &row.playlist_url, false) {
+        let pl = match ytdlp::course_playlist(home, row, false) {
             Ok(p) => p,
             Err(e) => {
                 todos.push(Todo { row, drive, dir, total: 0, wanted: vec![], missing: vec![], est_bytes: 0.0, title_warnings: vec![], note: format!("cannot read playlist: {e:#}") });
@@ -442,7 +442,7 @@ fn prune(home: &std::path::Path, only: Option<&str>) -> Result<()> {
         if !dir.is_dir() {
             continue;
         }
-        let pl = match ytdlp::playlist(home, &row.playlist_url, false) {
+        let pl = match ytdlp::course_playlist(home, row, false) {
             Ok(p) => p,
             Err(_) => continue,
         };

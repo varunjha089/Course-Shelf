@@ -42,7 +42,8 @@ Cargo.toml                 workspace: crates/core, crates/server, crates/fetch, 
 crates/core/src/           no UI, no HTTP: everything that touches disk or tools (with unit tests)
   config.rs                config.toml (drives, [mac], [ytdlp], [papers] library/list/banks_dir/inbox, [pdf_sources]); settings_dir, default_home,
                            home_pointer, ensure_home + STARTER_CONFIG; PapersPaths::starter (no [papers]); in-place edit of a drive's path
-  spec.rs, items.rs        courses.csv rows and the `items` syntax (all, 1-5,8, all-2,15)
+  spec.rs, items.rs        courses.csv rows and the `items` syntax (all, 1-5,8, all-2,15); optional `order` column (`reverse`: lecture N =
+                           N-th video from the end; `fetcher::course_playlist` and yt-dlp's `-N` / `playlist_count+1-playlist_index` do the counting)
   library.rs               folder scan: "NNN - Title.mp4" lectures, partial files; a course = a folder with videos, up to 3 levels under a drive
   tidy.rs                  after a download / single / move: shrink each .info.json to the KEEP fields and set the hidden flag (macOS chflags,
                            Windows attribute; none on Linux) on the .info.json and .vtt (they stay beside the video, same names: the id keys

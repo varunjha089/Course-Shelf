@@ -353,7 +353,7 @@ fn plan_for(app: &App, course: &str, refresh: bool, dest_root: Option<&str>, des
         }
         None => locate(&cfg, &app.home, &row)?,
     };
-    let pl = fetcher::playlist(&app.home, &row.playlist_url, refresh)?;
+    let pl = fetcher::course_playlist(&app.home, &row, refresh)?;
     let total = pl.entries.len() as u32;
     let wanted = row.items.resolve(total);
     let connected = if dest_folder.is_some() {
@@ -563,7 +563,7 @@ pub async fn api_adopt_preview(State(app): State<Shared>, Json(r): Json<CourseRe
         if !loc.dir.is_dir() {
             bail!("the course folder {} does not exist", loc.dir.display());
         }
-        let pl = fetcher::playlist(&app.home, &row.playlist_url, r.refresh)?;
+        let pl = fetcher::course_playlist(&app.home, &row, r.refresh)?;
         let entries: Vec<(u32, String)> = pl.entries.iter().map(|e| (e.index, e.title.clone())).collect();
         let proposals = adopt::propose(&loc.dir, &entries);
         let unmatched_positions: Vec<u32> = entries.iter().map(|e| e.0).filter(|i| !proposals.iter().any(|p| p.index == Some(*i))).collect();

@@ -112,6 +112,27 @@ pub fn playlist(home: &Path, url: &str, refresh: bool) -> Result<Playlist> {
     Ok(Playlist { title: raw.title.unwrap_or_default(), entries })
 }
 
+/// The playlist of a course, in lecture order: for an `order = reverse` row the last video is lecture 1.
+pub fn course_playlist(home: &Path, row: &CourseRow, refresh: bool) -> Result<Playlist> {
+    let mut pl = playlist(home, &row.playlist_url, refresh)?;
+    if row.reverse {
+        pl.entries.reverse();
+        for (i, e) in pl.entries.iter_mut().enumerate() {
+            e.index = i as u32 + 1;
+        }
+    }
+    Ok(pl)
+}
+
+/// `--playlist-items` for lecture numbers: lecture N of a reversed course is the N-th video from the end (`-N` to yt-dlp).
+fn playlist_items(row: &CourseRow, lectures: &[u32]) -> String {
+    if row.reverse {
+        lectures.iter().map(|n| format!("-{n}")).collect::<Vec<_>>().join(",")
+    } else {
+        to_ytdlp(lectures)
+    }
+}
+
 #[derive(Debug)]
 pub struct CourseResult {
     pub course: String,
@@ -220,13 +241,19 @@ pub fn download_course(
         None => "res,vcodec:h264,acodec:aac".to_string(),
     };
     let y = &cfg.ytdlp;
+    // files start with the lecture number; for a reversed playlist that is counted from the end
+    let (number, progress_number) = if row.reverse {
+        ("playlist_count+1-playlist_index", "info.playlist_count+1-info.playlist_index")
+    } else {
+        ("playlist_index", "info.playlist_index")
+    };
     let mut cmd = crate::tools::command("yt-dlp");
     cmd.arg("--ignore-errors")
         .arg("--no-overwrites")
         .arg("--continue")
         .args(["--color", "no_color"])
         .args(["-P", &dir.to_string_lossy()])
-        .args(["-o", "%(playlist_index)03d - %(title)s.%(ext)s"])
+        .args(["-o", &format!("%({number})03d - %(title)s.%(ext)s")])
         .args(["-f", "bv*+ba/b"])
         .args(["-S", &sort])
         .args(["--merge-output-format", "mp4"])
@@ -236,9 +263,9 @@ pub fn download_course(
         .args(["--embed-thumbnail", "--embed-metadata"])
         .args(["--sleep-interval", &y.sleep_min.to_string(), "--max-sleep-interval", &y.sleep_max.to_string()])
         .args(["--retries", "10", "--fragment-retries", "10", "--concurrent-fragments", "4"])
-        .args(["--playlist-items", &to_ytdlp(missing)])
+        .args(["--playlist-items", &playlist_items(row, missing)])
         .args(["--progress", "--newline"])
-        .args(["--progress-template", "download:CSPROG|%(info.playlist_index)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s"])
+        .args(["--progress-template", &format!("download:CSPROG|%({progress_number})s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s")])
         .args(&y.extra_args)
         .arg(&row.playlist_url)
         .stdin(Stdio::null())
@@ -392,4 +419,41 @@ pub fn verify_titles(home: &Path, row: &CourseRow, pl: &Playlist) -> Vec<String>
         }
     }
     warnings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reversed_courses_count_lectures_from_the_end() {
+        let mut row = CourseRow {
+            course: "P/C".into(),
+            playlist_url: String::new(),
+            items: crate::items::ItemSpec::parse("all").unwrap(),
+            items_text: "all".into(),
+            priority: 1,
+            drive: "local".into(),
+            quality_cap: None,
+            enabled: true,
+            note: String::new(),
+            reverse: false,
+            line: 2,
+        };
+        assert_eq!(playlist_items(&row, &[1, 2, 3, 7]), "1-3,7");
+        row.reverse = true;
+        assert_eq!(playlist_items(&row, &[1, 2, 7]), "-1,-2,-7");
+
+        // the cached listing (newest first) comes back in lecture order
+        let home = std::env::temp_dir().join(format!("cs_rev_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("cache")).unwrap();
+        row.playlist_url = "https://www.youtube.com/playlist?list=PLrev".into();
+        let json = r#"{"title": "T", "entries": [{"title": "Lec 3"}, {"title": "Lec 2"}, {"title": "Lec 1"}]}"#;
+        std::fs::write(home.join("cache").join(format!("{:016x}.json", fnv(&row.playlist_url))), json).unwrap();
+        let pl = course_playlist(&home, &row, false).unwrap();
+        let got: Vec<(u32, &str)> = pl.entries.iter().map(|e| (e.index, e.title.as_str())).collect();
+        assert_eq!(got, [(1, "Lec 1"), (2, "Lec 2"), (3, "Lec 3")]);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }

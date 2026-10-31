@@ -20,6 +20,9 @@ pub struct CourseRow {
     pub quality_cap: Option<u32>,
     pub enabled: bool,
     pub note: String,
+    /// Optional `order` column = `reverse`: the playlist lists the lectures newest first, so lecture N is the N-th video from
+    /// the END (files are numbered that way, and `items` counts that way). New uploads then keep the old numbers.
+    pub reverse: bool,
     /// 1-based line number in the file, for error messages.
     pub line: usize,
 }
@@ -62,7 +65,7 @@ pub fn load_courses(path: &Path) -> Result<Vec<CourseRow>> {
     let col = |name: &str| headers.iter().position(|h| h.eq_ignore_ascii_case(name));
     let need = |name: &str| col(name).ok_or_else(|| anyhow!("courses.csv has no '{name}' column"));
     let (c_course, c_url, c_items, c_drive) = (need("course")?, need("playlist_url")?, need("items")?, need("drive")?);
-    let (c_prio, c_cap, c_en, c_note) = (col("priority"), col("quality_cap"), col("enabled"), col("note"));
+    let (c_prio, c_cap, c_en, c_note, c_order) = (col("priority"), col("quality_cap"), col("enabled"), col("note"), col("order"));
 
     let mut rows = Vec::new();
     let mut seen = HashSet::new();
@@ -96,6 +99,11 @@ pub fn load_courses(path: &Path) -> Result<Vec<CourseRow>> {
             s => Some(s.trim_end_matches('p').parse::<u32>().with_context(|| ctx("quality_cap must be a number like 720"))?),
         };
         let enabled = parse_bool(&opt(c_en)).with_context(|| ctx("enabled"))?;
+        let reverse = match opt(c_order).to_ascii_lowercase().as_str() {
+            "" | "playlist" => false,
+            "reverse" | "reversed" => true,
+            other => bail!("{}", ctx(&format!("order '{other}' must be empty, playlist or reverse"))),
+        };
         rows.push(CourseRow {
             course,
             playlist_url,
@@ -106,6 +114,7 @@ pub fn load_courses(path: &Path) -> Result<Vec<CourseRow>> {
             quality_cap,
             enabled,
             note: opt(c_note),
+            reverse,
             line,
         });
     }
@@ -151,6 +160,15 @@ mod tests {
         let rows = load_courses(&t.0).unwrap();
         assert_eq!(rows[0].priority, 100);
         assert!(!rows[0].enabled);
+    }
+
+    #[test]
+    fn order_column() {
+        let t = write("course,playlist_url,items,drive,note,order\nA,https://y/?list=1,all,hdd,,reverse\nB,https://y/?list=2,all,hdd,\"x, y\"\n");
+        let rows = load_courses(&t.0).unwrap();
+        assert!(rows[0].reverse && !rows[1].reverse, "a row without the column keeps playlist order");
+        let t = write("course,playlist_url,items,drive,order\nA,https://y/?list=1,all,hdd,backwards\n");
+        assert!(load_courses(&t.0).is_err());
     }
 
     #[test]

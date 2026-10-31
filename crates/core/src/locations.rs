@@ -135,6 +135,7 @@ mod tests {
             course: "P/C".into(),
             playlist_url: String::new(),
             items: crate::items::ItemSpec::parse("all").unwrap(),
+            reverse: false,
             items_text: "all".into(),
             priority: 1,
             drive: "ssd".into(),
