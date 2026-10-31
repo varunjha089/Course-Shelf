@@ -1,12 +1,12 @@
 [package]
 name = "courseshelf-fetch"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
-courseshelf-core = { version = "0.2.0", path = "../core" }
+courseshelf-core = { version = "0.2.1", path = "../core" }
 csv = "1.4.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

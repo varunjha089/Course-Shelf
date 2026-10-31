@@ -1,12 +1,12 @@
 [package]
 name = "courseshelf-server"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
 axum = "0.8.9"
-courseshelf-core = { version = "0.2.0", path = "../core" }
+courseshelf-core = { version = "0.2.1", path = "../core" }
 http = "1.5.0"
 mime_guess = "2.0.5"
 rust-embed = "8.13.0"
