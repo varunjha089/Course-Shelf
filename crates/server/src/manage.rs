@@ -85,7 +85,10 @@ fn est_bytes(cfg: &Config, row: &CourseRow, secs: f64) -> f64 {
 pub(crate) struct ManageCourse {
     course: String,
     title: String,
+    /// The drive the course's folder is on now ("folder" for a custom folder outside every drive).
     drive: String,
+    /// The drive courses.csv names (where it would go with no custom folder).
+    planned_drive: String,
     /// In courses.csv? Courses found on a drive without a row can still be moved.
     listed: bool,
     enabled: bool,
@@ -157,12 +160,13 @@ pub async fn api_overview(State(app): State<Shared>) -> Json<ManageOut> {
             .iter()
             .filter_map(|r| {
                 let loc = locate(&cfg, &app.home, r).ok()?;
-                let d = cfg.drive(&r.drive).ok()?;
+                let d = courseshelf_core::locations::host_drive(&cfg, r, &loc).ok()?;
                 let lectures = library::scan_folder(&loc.dir);
                 Some(ManageCourse {
                     course: r.course.clone(),
                     title: nice(&r.course),
-                    drive: r.drive.clone(),
+                    drive: d.name.clone(),
+                    planned_drive: r.drive.clone(),
                     listed: true,
                     enabled: r.enabled,
                     playlist_url: r.playlist_url.clone(),
@@ -191,6 +195,7 @@ pub async fn api_overview(State(app): State<Shared>) -> Json<ManageOut> {
                 courses.push(ManageCourse {
                     title: nice(&c.course),
                     drive: d.name.clone(),
+                    planned_drive: d.name.clone(),
                     listed: false,
                     enabled: false,
                     playlist_url: String::new(),
@@ -264,9 +269,12 @@ pub struct CourseReq {
     refresh: bool,
     #[serde(default)]
     force_titles: bool,
-    /// Download into `<dest_root>/<course>` instead of the course's usual place. A drive's folder or any folder.
+    /// Download into `<dest_root>/<course>` instead of the course's usual place: a drive's folder.
     #[serde(default)]
     dest_root: Option<String>,
+    /// Download into exactly this folder (it may be new; its parent must exist). Wins over `dest_root`.
+    #[serde(default)]
+    dest_folder: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -301,14 +309,41 @@ fn dest_located(cfg: &Config, dest_root: &str, course: &str) -> Result<(Located,
     Ok((Located { dir, state_dir, overridden: true }, None))
 }
 
-fn plan_for(app: &App, course: &str, refresh: bool, dest_root: Option<&str>) -> Result<(PlanOut, Config, CourseRow, Located)> {
+/// A course folder the user picked exactly. The parent must exist (a disk that is not plugged in is refused); the folder itself
+/// may be new. Returns where it is, and the drive it lies on (or the folder itself when it is on no configured drive).
+fn exact_located(cfg: &Config, row: &CourseRow, folder: &str) -> Result<(Located, courseshelf_core::config::Drive)> {
+    let dir = PathBuf::from(folder);
+    if !dir.is_absolute() {
+        bail!("{folder} is not a full path");
+    }
+    let parent = dir.parent().filter(|p| p.is_dir()).ok_or_else(|| anyhow!("{folder} cannot be made here: its parent folder does not exist (is the disk plugged in?)"))?;
+    let dir = parent.canonicalize()?.join(dir.file_name().ok_or_else(|| anyhow!("{folder} has no folder name"))?);
+    let default = cfg.drive(&row.drive).ok().filter(|d| d.connected()).map(|d| d.root.join(&row.course));
+    let at_default = default.as_ref().is_some_and(|d| d.canonicalize().unwrap_or_else(|_| d.clone()) == dir);
+    let loc = if at_default {
+        Located { dir: dir.clone(), state_dir: cfg.drive(&row.drive)?.state_dir(), overridden: false }
+    } else {
+        Located { state_dir: dir.join(".courseshelf"), dir: dir.clone(), overridden: true }
+    };
+    let host = courseshelf_core::locations::host_drive(cfg, row, &Located { overridden: true, ..loc.clone() })?;
+    Ok((loc, host))
+}
+
+fn plan_for(app: &App, course: &str, refresh: bool, dest_root: Option<&str>, dest_folder: Option<&str>) -> Result<(PlanOut, Config, CourseRow, Located)> {
     let (cfg, rows) = load_all(app)?;
     let row = find_row(&rows, course)?.clone();
     if row.playlist_url.is_empty() {
         bail!("this course has no playlist_url in courses.csv yet");
     }
     let mut drive = cfg.drive(&row.drive)?.clone();
+    let dest_folder = dest_folder.filter(|d| !d.is_empty());
+    let dest_root = if dest_folder.is_some() { None } else { dest_root };
     let loc = match dest_root.filter(|d| !d.is_empty()) {
+        _ if dest_folder.is_some() => {
+            let (l, host) = exact_located(&cfg, &row, dest_folder.unwrap_or_default())?;
+            drive = host;
+            l
+        }
         Some(d) => {
             let (l, dd) = dest_located(&cfg, d, &row.course)?;
             drive = dd.unwrap_or(courseshelf_core::config::Drive { name: "folder".into(), root: PathBuf::from(d), budget_gb: None });
@@ -319,12 +354,20 @@ fn plan_for(app: &App, course: &str, refresh: bool, dest_root: Option<&str>) -> 
     let pl = fetcher::playlist(&app.home, &row.playlist_url, refresh)?;
     let total = pl.entries.len() as u32;
     let wanted = row.items.resolve(total);
-    let connected = if dest_root.is_some() { drive.root.is_dir() } else if loc.overridden { loc.dir.exists() } else { drive.connected() };
+    let connected = if dest_folder.is_some() {
+        loc.dir.parent().is_some_and(Path::is_dir)
+    } else if dest_root.is_some() {
+        drive.root.is_dir()
+    } else if loc.overridden {
+        loc.dir.exists()
+    } else {
+        drive.connected()
+    };
     let have_set = if loc.dir.is_dir() { library::downloaded_indexes(&loc.dir) } else { Default::default() };
     let missing: Vec<u32> = wanted.iter().copied().filter(|i| !have_set.contains(i)).collect();
     let secs: f64 = missing.iter().filter_map(|i| pl.entries.get(*i as usize - 1)).map(|e| e.duration.unwrap_or(0.0)).sum();
     let est = est_bytes(&cfg, &row, secs);
-    let free = if connected { drive.space().map(|s| s.0).or_else(|| if loc.overridden && dest_root.is_none() { Some(u64::MAX) } else { None }) } else { None };
+    let free = if connected { drive.space().map(|s| s.0).or_else(|| if loc.overridden && dest_root.is_none() && dest_folder.is_none() { Some(u64::MAX) } else { None }) } else { None };
     let budget = drive.budget_gb.map(|g| g * 1e9);
     let fits = connected && free.map(|f| est <= f as f64 * 0.97).unwrap_or(true) && budget.map(|b| est <= b).unwrap_or(true);
     let mut note = String::new();
@@ -352,7 +395,7 @@ fn plan_for(app: &App, course: &str, refresh: bool, dest_root: Option<&str>) -> 
 }
 
 pub async fn api_plan(State(app): State<Shared>, Json(r): Json<CourseReq>) -> Response {
-    match tokio::task::spawn_blocking(move || plan_for(&app, &r.course, r.refresh, r.dest_root.as_deref()).map(|x| x.0)).await {
+    match tokio::task::spawn_blocking(move || plan_for(&app, &r.course, r.refresh, r.dest_root.as_deref(), r.dest_folder.as_deref()).map(|x| x.0)).await {
         Ok(Ok(p)) => Json(p).into_response(),
         Ok(Err(e)) => bad(format!("{e:#}")),
         Err(e) => err500(anyhow!("{e}")),
@@ -361,8 +404,8 @@ pub async fn api_plan(State(app): State<Shared>, Json(r): Json<CourseReq>) -> Re
 
 pub async fn api_download(State(app): State<Shared>, Json(r): Json<CourseReq>) -> Response {
     let app2 = app.clone();
-    let dest = r.dest_root.clone().filter(|d| !d.is_empty());
-    let planned = tokio::task::spawn_blocking(move || plan_for(&app2, &r.course, false, r.dest_root.as_deref()).map(|x| (x, r.force_titles))).await;
+    let dest = r.dest_folder.clone().filter(|d| !d.is_empty()).or_else(|| r.dest_root.clone().filter(|d| !d.is_empty()));
+    let planned = tokio::task::spawn_blocking(move || plan_for(&app2, &r.course, false, r.dest_root.as_deref(), r.dest_folder.as_deref()).map(|x| (x, r.force_titles))).await;
     let ((plan, cfg, row, loc), force) = match planned {
         Ok(Ok(x)) => x,
         Ok(Err(e)) => return bad(format!("{e:#}")),
@@ -568,16 +611,35 @@ pub struct MoveReq {
     from_drive: Option<String>,
     #[serde(default)]
     keep_original: bool,
+    /// Move into exactly this folder instead of `<to_drive>/<course>` (it may be new; its parent must exist).
+    #[serde(default)]
+    to_folder: Option<String>,
 }
 
-fn move_plan(app: &App, course: &str, to_drive: &str, from_drive: Option<&str>) -> Result<(mover::MovePlan, Config, CourseRef, courseshelf_core::config::Drive)> {
+fn move_plan(app: &App, course: &str, to_drive: &str, from_drive: Option<&str>, to_folder: Option<&str>) -> Result<(mover::MovePlan, Config, CourseRef, courseshelf_core::config::Drive)> {
     let (cfg, rows) = load_all(app)?;
     let cref = resolve_course(app, &cfg, &rows, course, from_drive)?;
-    let to = cfg.drive(to_drive)?.clone();
-    if !to.connected() {
-        bail!("drive '{to_drive}' is not connected");
-    }
-    let dst = to.root.join(&cref.name);
+    let (to, dst) = match to_folder.filter(|f| !f.is_empty()) {
+        Some(f) => {
+            let row = rows.iter().find(|r| r.course == cref.name).ok_or_else(|| anyhow!("a course without a row in courses.csv can only be moved to a drive"))?;
+            let (loc, host) = exact_located(&cfg, row, f)?;
+            if loc.dir.canonicalize().ok() == cref.dir.canonicalize().ok() {
+                bail!("the course is already in {}", loc.dir.display());
+            }
+            if !library::scan_folder(&loc.dir).is_empty() {
+                bail!("{} already holds videos; pick an empty or new folder", loc.dir.display());
+            }
+            (host, loc.dir)
+        }
+        None => {
+            let to = cfg.drive(to_drive)?.clone();
+            if !to.connected() {
+                bail!("drive '{to_drive}' is not connected");
+            }
+            let dst = to.root.join(&cref.name);
+            (to, dst)
+        }
+    };
     if dst == cref.dir {
         bail!("the course already lives on '{to_drive}'");
     }
@@ -587,7 +649,7 @@ fn move_plan(app: &App, course: &str, to_drive: &str, from_drive: Option<&str>) 
 
 pub async fn api_move_plan(State(app): State<Shared>, Json(r): Json<MoveReq>) -> Response {
     let res = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
-        let (plan, _cfg, _cref, to) = move_plan(&app, &r.course, &r.to_drive, r.from_drive.as_deref())?;
+        let (plan, _cfg, _cref, to) = move_plan(&app, &r.course, &r.to_drive, r.from_drive.as_deref(), r.to_folder.as_deref())?;
         let free = to.space().map(|s| s.0);
         let need = if plan.same_fs && !r.keep_original { 0 } else { plan.total_bytes };
         let ok = free.map(|f| need as f64 * 1.02 <= f as f64).unwrap_or(true);
@@ -608,9 +670,9 @@ pub async fn api_move_plan(State(app): State<Shared>, Json(r): Json<MoveReq>) ->
 
 pub async fn api_move_start(State(app): State<Shared>, Json(r): Json<MoveReq>) -> Response {
     let app2 = app.clone();
-    let (course, to_drive, keep, from) = (r.course.clone(), r.to_drive.clone(), r.keep_original, r.from_drive.clone());
-    let planned = tokio::task::spawn_blocking(move || move_plan(&app2, &course, &to_drive, from.as_deref())).await;
-    let (plan, _cfg, cref, to) = match planned {
+    let (course, to_drive, keep, from, to_folder) = (r.course.clone(), r.to_drive.clone(), r.keep_original, r.from_drive.clone(), r.to_folder.clone());
+    let planned = tokio::task::spawn_blocking(move || move_plan(&app2, &course, &to_drive, from.as_deref(), to_folder.as_deref())).await;
+    let (plan, cfg, cref, to) = match planned {
         Ok(Ok(x)) => x,
         Ok(Err(e)) => return bad(format!("{e:#}")),
         Err(e) => return err500(anyhow!("{e}")),
@@ -631,8 +693,13 @@ pub async fn api_move_start(State(app): State<Shared>, Json(r): Json<MoveReq>) -
         ..Default::default()
     };
     let home = app.home.clone();
+    // the course's usual folder (courses.csv drive) and whether the move lands exactly there
+    let usual = cref.csv_drive.as_deref().and_then(|d| cfg.drive(d).ok()).map(|d| (d.state_dir(), d.root.join(&cref.name)));
+    let at_usual = usual.as_ref().is_none_or(|(_, dir)| *dir == plan.dst);
     let work: crate::jobs::Work = Box::new(move |ctx| {
-        to.init()?;
+        if cfg.drives.iter().any(|d| d.name == to.name && d.root == to.root) {
+            to.init()?;
+        }
         let mut files_done = 0u32;
         let mut cur = String::new();
         ctx.log(format!("{} {} file(s), {} MB: {} → {}", if plan.same_fs && !keep { "moving" } else { "copying" }, plan.files.len(), plan.total_bytes / 1_000_000, plan.src.display(), plan.dst.display()));
@@ -658,12 +725,12 @@ pub async fn api_move_start(State(app): State<Shared>, Json(r): Json<MoveReq>) -
         });
         // progress follows the files
         let src_state = cref.state_dir.clone();
-        // progress lives with the course: in the drive's state folder when the course sits on the drive courses.csv names
-        // (or is not in the CSV at all), otherwise beside the course folder, matching how `locate` finds it
-        let at_home_drive = cref.csv_drive.as_deref().map(|d| d == to.name).unwrap_or(true);
+        // progress lives with the course: in the drive's state folder when the course sits at its usual place on the drive
+        // courses.csv names (or is not in the CSV at all and lands on a drive), otherwise beside the course folder, as `locate` finds it
+        let at_home_drive = at_usual;
         if src_state.join("progress.sqlite").exists() {
             let from = Progress::open(&src_state)?;
-            let dest_state = if at_home_drive { to.state_dir() } else { plan.dst.join(".courseshelf") };
+            let dest_state = if at_home_drive { usual.as_ref().map_or_else(|| to.state_dir(), |(s, _)| s.clone()) } else { plan.dst.join(".courseshelf") };
             let into = Progress::open(&dest_state)?;
             let rows = from.export(&cref.name)?;
             let n = into.import(&cref.name, &rows, Some(from.speed(&cref.name)))?;

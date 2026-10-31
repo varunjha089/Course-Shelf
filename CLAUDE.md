@@ -61,7 +61,11 @@ crates/core/src/           no UI, no HTTP: everything that touches disk or tools
                            launch tools through tools::command; tools::open opens or reveals a file (open / explorer / xdg-open), never call `open` directly
 crates/server/src/
   lib.rs                   axum server on 127.0.0.1 (random port), cookie token, Host check, routes, video streaming with Range
-  manage.rs                Downloads-tab endpoints (overview incl. the data folder, plan, download, jobs, adopt, move, drives, browse, singles)
+  manage.rs                Downloads-tab endpoints (overview incl. the data folder, plan, download, jobs, adopt, move, drives, browse, singles).
+                           Download places: `dest_root` = a drive's folder (course goes to <root>/<course>), `dest_folder` = exactly that folder
+                           (`exact_located`); moves take `to_drive` or `to_folder` the same way. A place other than <csv drive>/<course> is
+                           recorded in locations.json (and the course's progress moves to <folder>/.courseshelf); the usual place clears it.
+                           The overview's `drive` is where the folder IS (`locations::host_drive`), `planned_drive` the courses.csv one
   jobs.rs                  one-at-a-time job queue with live progress (kinds: download, move, single, collection, addpapers)
   annot.rs                 annotations (annotations/<key>.json, key = hash of the PDF's bytes), books list, bookmarks
   collections.rs           books joined from papers (pdfunite), missing papers downloaded first, rename / reorder / delete

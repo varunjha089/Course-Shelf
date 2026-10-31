@@ -106,7 +106,10 @@ $F tidy [FOLDER...]                  # shrink and hide the .info.json/.vtt side 
 
 - **Courses**: every folder with videos on your drives (up to 3 levels deep), with resume, ticks and "Copy to Mac" for studying without the disk.
 - **Downloads**: download lectures, point a course at a folder you downloaded by hand, rename hand-downloaded files to the playlist titles, move a course
-  to another drive (ticks and positions come along), and **single videos**: paste a YouTube link, download it to any folder. "Remove link" never deletes a file.
+  to another drive or into a folder you choose (ticks and positions come along), and **single videos**: paste a YouTube link, download it to any folder.
+  "Remove link" never deletes a file. A download asks where to save: where the course is now, `<drive>/<course>` on another drive, or **another folder**,
+  which is used exactly as picked (type a new name to make a new folder). A course kept in its own folder is shown on the drive that folder is on; the drive
+  in `courses.csv` is only where it goes when it has no folder of its own. The app never edits `courses.csv`.
 - **Papers**: a view of a paper list CSV, in-app reading, question banks (`banks_dir`), arXiv / direct-PDF download into `papers/inbox/` (never into the library),
   and "Make a book" from chosen papers.
 - **Add papers** (Papers tab): paste arXiv ids or links, or DOIs; they are looked up on arXiv / Crossref, papers already in the list are marked (matched on arXiv id,

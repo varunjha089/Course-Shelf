@@ -1192,7 +1192,8 @@ function FolderPicker({ onPick, onClose, anyFolder = false, noCreate = false, ti
 
 function CourseManager({ c, drives, busy, onChanged, onJob }: { c: ManageCourse; drives: DriveOut[]; busy: boolean; onChanged: () => void; onJob: () => void }) {
   const [panel, setPanel] = useState<null | "check" | "point" | "adopt" | "move">(null);
-  const [dest, setDest] = useState<string>(""); // "" = the course's usual place
+  const [dest, setDest] = useState<string>(""); // "" = where the course is now; else a drive's folder (course goes into <drive>/<course>)
+  const [destFolder, setDestFolder] = useState<string>(""); // exactly this folder (wins over dest)
   const [pickDest, setPickDest] = useState(false);
   const [destChosen, setDestChosen] = useState(false); // the download waits until a place is picked
   const [err, setErr] = useState<string | null>(null);
@@ -1205,18 +1206,21 @@ function CourseManager({ c, drives, busy, onChanged, onJob }: { c: ManageCourse;
   const [toDrive, setToDrive] = useState<string>("");
   const [keep, setKeep] = useState(false);
   const [mplan, setMplan] = useState<MovePlan | null>(null);
+  const [toFolder, setToFolder] = useState<string>(""); // move into exactly this folder
+  const [pickMoveFolder, setPickMoveFolder] = useState(false);
   const fail = (e: unknown) => setErr(String((e as Error).message ?? e));
   const reset = () => { setErr(null); setInfo(null); };
 
-  const openCheck = () => { setDest(""); setDestChosen(false); setPickDest(false); check(false, ""); };
-  const check = async (refresh = false, d = dest) => {
+  const openCheck = () => { setDest(""); setDestFolder(""); setDestChosen(false); setPickDest(false); check(false, "", ""); };
+  const check = async (refresh = false, d = dest, f = destFolder) => {
     reset(); setPanel("check"); setChecking(true); setPlan(null);
-    try { setPlan(await planDownload(c.course, refresh, d)); } catch (e) { fail(e); } finally { setChecking(false); }
+    try { setPlan(await planDownload(c.course, refresh, d, f)); } catch (e) { fail(e); } finally { setChecking(false); }
   };
-  const chooseDest = (d: string) => { setDest(d); setDestChosen(true); setPickDest(false); check(false, d); };
+  const chooseDest = (d: string) => { setDest(d); setDestFolder(""); setDestChosen(true); setPickDest(false); check(false, d, ""); };
+  const chooseFolder = (f: string) => { setDest(""); setDestFolder(f); setDestChosen(true); setPickDest(false); check(false, "", f); };
   const start = async () => {
     reset();
-    try { await startDownload(c.course, force, dest); setPanel(null); setPlan(null); onJob(); } catch (e) { fail(e); }
+    try { await startDownload(c.course, force, dest, destFolder); setPanel(null); setPlan(null); onJob(); } catch (e) { fail(e); }
   };
   const point = async (path: string) => {
     reset();
@@ -1236,14 +1240,14 @@ function CourseManager({ c, drives, busy, onChanged, onJob }: { c: ManageCourse;
     const renames = (props ?? []).filter((p) => p.status === "rename" && picked[p.file] && p.new_name).map((p) => [p.file, p.new_name!] as [string, string]);
     try { const r = await adoptApply(c.course, renames); setInfo(`Renamed ${r.renamed} file${r.renamed === 1 ? "" : "s"}.`); setPanel(null); onChanged(); } catch (e) { fail(e); }
   };
-  const checkMove = async (drive = toDrive, k = keep) => {
+  const checkMove = async (drive = toDrive, k = keep, folder = toFolder) => {
     reset(); setMplan(null);
-    if (!drive) return;
-    try { setMplan(await planMove(c.course, drive, k, c.drive)); } catch (e) { fail(e); }
+    if (!drive && !folder) return;
+    try { setMplan(await planMove(c.course, drive, k, c.listed ? undefined : c.drive, folder)); } catch (e) { fail(e); }
   };
   const doMove = async () => {
     reset();
-    try { await startMove(c.course, toDrive, keep, c.drive); setPanel(null); setMplan(null); onJob(); } catch (e) { fail(e); }
+    try { await startMove(c.course, toDrive, keep, c.listed ? undefined : c.drive, toFolder); setPanel(null); setMplan(null); onJob(); } catch (e) { fail(e); }
   };
   // every other drive, including ones that are unplugged (shown but not selectable)
   const targets = drives.filter((d) => !(c.location === d.path + "/" + c.course || c.location.startsWith(d.path + "/" + c.course)));
@@ -1251,7 +1255,8 @@ function CourseManager({ c, drives, busy, onChanged, onJob }: { c: ManageCourse;
     <div className="mcourse">
       <div className="mhead">
         <div>
-          <b>{c.title}</b> <span className="tag">{c.drive}</span>{!c.listed && <span className="tag" title="Found on a drive but there is no row for it in courses.csv. It can still be moved.">not in CSV</span>}{c.overridden && <span className="tag" title="locations.json points this course at a custom folder">custom folder</span>}
+          <b>{c.title}</b> <span className="tag" title={c.drive === "folder" ? "A folder on no configured drive" : "The drive this course is on now"}>{c.drive === "folder" ? "own folder" : drives.find((d) => d.name === c.drive)?.is_mac ? `${c.drive} (this Mac)` : c.drive}</span>
+          {c.listed && c.planned_drive !== c.drive && <span className="tag muted" title="courses.csv names this drive; the course's own folder (locations.json) wins, so downloads and moves start from where it is now">courses.csv: {c.planned_drive}</span>}{!c.listed && <span className="tag" title="Found on a drive but there is no row for it in courses.csv. It can still be moved.">not in CSV</span>}{c.overridden && <span className="tag" title="locations.json points this course at a custom folder">custom folder</span>}
           <div className="muted small">{c.location}{!c.folder_exists && " (not there yet)"}</div>
           <div className="muted small">{c.on_disk} video{c.on_disk === 1 ? "" : "s"} on disk · {fmtGB(c.size_bytes)}{c.listed ? ` · items ${c.items}` : ""}{c.note ? ` · ${c.note}` : ""}</div>
         </div>
@@ -1259,7 +1264,7 @@ function CourseManager({ c, drives, busy, onChanged, onJob }: { c: ManageCourse;
           <button className="btn sm primary" onClick={openCheck} disabled={!c.playlist_url} title={c.playlist_url ? "Look up the playlist and see what is missing" : c.listed ? "courses.csv has no playlist_url for this course" : "Add a row with a playlist_url to courses.csv to download more of this course"}>Check &amp; download…</button>
           <button className="btn sm" onClick={() => { reset(); setPanel(panel === "point" ? null : "point"); }} disabled={!c.listed} title={c.listed ? "" : "Needs a row in courses.csv"}>Existing folder…</button>
           <button className="btn sm" onClick={openAdopt} disabled={!c.listed || !c.playlist_url || c.on_disk === 0} title="Number hand-downloaded files by matching their titles to the playlist">Match names…</button>
-          <button className="btn sm primary" onClick={() => { reset(); setPanel(panel === "move" ? null : "move"); setMplan(null); }} disabled={c.on_disk === 0} title="Move or copy this course to the HDD, the SSD or this Mac">Move…</button>
+          <button className="btn sm primary" onClick={() => { reset(); setPanel(panel === "move" ? null : "move"); setMplan(null); setToFolder(""); setToDrive(""); }} disabled={c.on_disk === 0} title="Move or copy this course to the HDD, the SSD, this Mac or a folder you choose">Move…</button>
         </div>
       </div>
       {err && <div className="err">{err}</div>}
@@ -1274,22 +1279,22 @@ function CourseManager({ c, drives, busy, onChanged, onJob }: { c: ManageCourse;
               <div className="muted small">Estimated size about {fmtGB(plan.est_bytes)} · {destChosen ? <>free there {fmtGB(plan.free_bytes)} · saving to {plan.location}</> : "no place chosen yet"}</div>
               <div className="small"><b>Where should it be saved?</b> Pick a place; nothing downloads until you do.</div>
               <div className="controls">
-                {[{ key: "", label: `Usual place (${c.drive})`, path: "", connected: !!drives.find((d) => d.name === c.drive)?.connected, free: drives.find((d) => d.name === c.drive)?.free_bytes ?? null },
-                  ...drives.filter((d) => d.name !== c.drive).map((d) => ({ key: d.path, label: d.is_mac ? `This Mac (${d.name})` : d.name, path: d.path, connected: d.connected, free: d.free_bytes }))].map((o) => {
+                {[{ key: "", label: c.overridden ? `Where it is now (${c.drive === "folder" ? "its folder" : c.drive})` : `Usual place (${c.drive})`, path: c.location, connected: c.drive_connected, free: c.free_bytes },
+                  ...drives.filter((d) => d.name !== c.drive).map((d) => ({ key: d.path, label: d.is_mac ? `This Mac (${d.name})` : d.name, path: `${d.path}/${c.course}`, connected: d.connected, free: d.free_bytes }))].map((o) => {
                   const room = o.free != null && o.free >= plan.est_bytes * 1.03;
                   return (
-                    <button key={o.key || "usual"} className={"btn sm" + (destChosen && dest === o.key ? " primary" : "")} disabled={!o.connected}
+                    <button key={o.key || "usual"} className={"btn sm" + (destChosen && !destFolder && dest === o.key ? " primary" : "")} disabled={!o.connected}
                       title={o.path || "The drive courses.csv names for this course"}
                       onClick={() => chooseDest(o.key)}>
                       {o.label} · {o.connected ? (o.free != null ? `${fmtGB(o.free)} free${room ? "" : " · too small"}` : "connected") : "not connected"}
                     </button>
                   );
                 })}
-                <button className={"btn sm" + (destChosen && dest && !drives.some((d) => d.path === dest) ? " primary" : "")} onClick={() => setPickDest(true)}>
-                  {destChosen && dest && !drives.some((d) => d.path === dest) ? `Folder: ${dest}` : "Another folder…"}
+                <button className={"btn sm" + (destChosen && destFolder ? " primary" : "")} onClick={() => setPickDest(true)} title="Pick the exact folder for this course's videos">
+                  {destChosen && destFolder ? `Folder: ${destFolder}` : "Another folder…"}
                 </button>
               </div>
-              {pickDest && <FolderPicker anyFolder noCreate title="Choose the folder to save into (the course goes in a sub-folder of it)" onPick={(p) => chooseDest(p)} onClose={() => setPickDest(false)} />}
+              {pickDest && <FolderPicker anyFolder title="Choose the folder for this course's videos (they go straight into it; type a new name to make a new folder)" start={c.location} onPick={(p) => chooseFolder(p)} onClose={() => setPickDest(false)} />}
               {plan.note && <div className="small" style={{ color: "var(--warn)" }}>{plan.note}</div>}
               {destChosen && !plan.drive_connected && <div className="err">That place is not available. Plug the disk in, or pick another place above.</div>}
               {destChosen && plan.drive_connected && !plan.fits && <div className="err">Not enough room (free space or the drive's budget in config.toml).</div>}
@@ -1356,16 +1361,18 @@ function CourseManager({ c, drives, busy, onChanged, onJob }: { c: ManageCourse;
 
       {panel === "move" && (
         <div className="panel">
-          <div className="muted small">Moves this course's files to <code>&lt;drive&gt;/{c.course}</code> on the disk you pick (the HDD, the SSD or this Mac) and carries your ticks and watch positions with them. Files are copied and checked before anything is removed. Unplugged drives are listed but cannot be chosen.</div>
+          <div className="muted small">Moves this course's files to <code>&lt;drive&gt;/{c.course}</code> on the disk you pick (the HDD, the SSD or this Mac), or into a folder you choose, and carries your ticks and watch positions with them. Files are copied and checked before anything is removed. Unplugged drives are listed but cannot be chosen.</div>
           <div className="controls">
             <label>To drive{" "}
-              <select value={toDrive} onChange={(e) => { setToDrive(e.target.value); checkMove(e.target.value, keep); }}>
+              <select value={toFolder ? "" : toDrive} onChange={(e) => { setToFolder(""); setToDrive(e.target.value); checkMove(e.target.value, keep, ""); }}>
                 <option value="">choose…</option>
                 {targets.map((d) => <option key={d.name} value={d.name} disabled={!d.connected}>{driveLabel(d)}</option>)}
               </select>
             </label>
+            {c.listed && <button className={"btn sm" + (toFolder ? " primary" : "")} onClick={() => setPickMoveFolder(true)}>{toFolder ? `Folder: ${toFolder}` : "Another folder…"}</button>}
             <label><input type="checkbox" checked={keep} onChange={(e) => { setKeep(e.target.checked); checkMove(toDrive, e.target.checked); }} /> Keep the original (copy instead of move)</label>
           </div>
+          {pickMoveFolder && <FolderPicker anyFolder title="Choose the folder to move this course into (an empty or new folder; the videos go straight into it)" onPick={(p) => { setPickMoveFolder(false); setToFolder(p); setToDrive(""); checkMove("", keep, p); }} onClose={() => setPickMoveFolder(false)} />}
           {mplan && (
             <>
               <div className="small">{mplan.files} file{mplan.files === 1 ? "" : "s"}, {fmtGB(mplan.total_bytes)} · {mplan.same_fs && !keep ? "same disk: an instant move" : "different disk: a copy, then the originals are removed after checking"}{mplan.already_there > 0 ? ` · ${mplan.already_there} already there` : ""}</div>

@@ -213,7 +213,10 @@ export const openInbox = (id: string, reveal: boolean) => post("/api/open", { ki
 export interface ManageCourse {
   course: string;
   title: string;
+  /** the drive the course's folder is on now ("folder": a custom folder on no configured drive) */
   drive: string;
+  /** the drive courses.csv names */
+  planned_drive: string;
   listed: boolean;
   size_bytes: number;
   enabled: boolean;
@@ -322,16 +325,18 @@ export async function getJson<T>(path: string): Promise<T> {
 
 export const getManage = () => getJson<ManageState>("/api/manage");
 export const getJobs = () => getJson<{ jobs: Job[] }>("/api/manage/jobs").then((x) => x.jobs);
-export const planDownload = (course: string, refresh = false, dest_root = "") => post("/api/manage/plan", { course, refresh, dest_root }) as Promise<DlPlan>;
-export const startDownload = (course: string, force_titles = false, dest_root = "") => post("/api/manage/download", { course, force_titles, dest_root }) as Promise<{ job: number }>;
+// dest_root: a drive's folder (the course goes into <dest_root>/<course>); dest_folder: exactly this folder (wins)
+export const planDownload = (course: string, refresh = false, dest_root = "", dest_folder = "") => post("/api/manage/plan", { course, refresh, dest_root, dest_folder }) as Promise<DlPlan>;
+export const startDownload = (course: string, force_titles = false, dest_root = "", dest_folder = "") => post("/api/manage/download", { course, force_titles, dest_root, dest_folder }) as Promise<{ job: number }>;
 export const cancelJob = (job: number) => post("/api/manage/cancel", { job });
 export const setLocation = (course: string, path: string) => post("/api/manage/location", { course, path }) as Promise<{ location: string; videos: number }>;
 export const clearLocation = (course: string) => post("/api/manage/location/clear", { course });
 export const adoptPreview = (course: string, refresh = false) =>
   post("/api/manage/adopt/preview", { course, refresh }) as Promise<{ playlist_title: string; playlist_total: number; proposals: Proposal[]; positions_without_file: number }>;
 export const adoptApply = (course: string, renames: [string, string][]) => post("/api/manage/adopt/apply", { course, renames }) as Promise<{ renamed: number }>;
-export const planMove = (course: string, to_drive: string, keep_original: boolean, from_drive?: string) => post("/api/manage/move/plan", { course, to_drive, keep_original, from_drive }) as Promise<MovePlan>;
-export const startMove = (course: string, to_drive: string, keep_original: boolean, from_drive?: string) => post("/api/manage/move/start", { course, to_drive, keep_original, from_drive }) as Promise<{ job: number }>;
+// to_folder: move into exactly this folder instead of <to_drive>/<course>
+export const planMove = (course: string, to_drive: string, keep_original: boolean, from_drive?: string, to_folder = "") => post("/api/manage/move/plan", { course, to_drive, keep_original, from_drive, to_folder }) as Promise<MovePlan>;
+export const startMove = (course: string, to_drive: string, keep_original: boolean, from_drive?: string, to_folder = "") => post("/api/manage/move/start", { course, to_drive, keep_original, from_drive, to_folder }) as Promise<{ job: number }>;
 export const browse = (path?: string) => getJson<BrowseOut>(`/api/manage/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`);
 
 export const setDrive = (name: string, path: string, create = false) => post("/api/manage/drive", { name, path, create }) as Promise<{ ok: boolean; path: string }>;
