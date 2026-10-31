@@ -167,7 +167,8 @@ This compiles but does not run the Windows tests: the workflow runs them. The ap
 - **A course listed twice, with its progress split in two**: a course's location (locations.json) pointed INSIDE the Mac drive under another folder name
   (`<drive>/Extra/Provider/Course`), so the drive scan listed that folder again as an unlisted course, and each entry saved progress to its own database.
   Now both tabs skip a scanned folder that is a course's location, the location's copy is labelled with the drive it lies in (and as the Mac copy), and
-  `build_state` also reads progress saved under the folder's own name (`CopyRef::alias`). Test: `located_course_inside_a_drive_is_listed_once`.
+  `build_state` also reads progress saved under the folder's own name (`CopyRef::alias`), and at start-up `merge_alias_progress` copies those
+  records (only newer ones; nothing deleted) into the course's own database. Test: `located_course_inside_a_drive_is_listed_once`.
 - **A single video is not a course until it is inside a drive**: a course is a FOLDER with videos, up to 3 levels under a drive root.
 - yt-dlp: YouTube sometimes answers 429 for subtitles (the lecture is kept); `--embed-subs` needs ffmpeg; VP9/AV1 may not play in the app's video engine,
   so H.264 wins only as a tie-breaker at equal resolution (`-S "res,vcodec:h264,acodec:aac"`).

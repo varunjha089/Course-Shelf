@@ -1079,8 +1079,38 @@ impl Running {
 }
 
 /// Start the server on its own thread and return once it is listening. `port` 0 = any free port.
+/// Progress saved under a folder's own name (while a course's location inside a drive was also listed as an extra course) is
+/// copied once into the course's own database, newest record winning, so each course keeps its progress in one place.
+/// Nothing is deleted; `build_state` still reads the old records too. Returns the number of lectures brought over.
+fn merge_alias_progress(home: &Path) -> usize {
+    let Ok(cfg) = Config::load(home) else { return 0 };
+    let mut n = 0;
+    for (course, dir) in locations::load(home) {
+        let Some((drive, alias)) = cfg.drives.iter().filter(|d| d.connected()).find_map(|d| locations::relative_inside(&dir, &d.root).map(|rel| (d, rel))) else {
+            continue;
+        };
+        let (Some(old), true) = (open_progress(&drive.state_dir(), true), dir.is_dir()) else { continue };
+        let rows = old.export(&alias).unwrap_or_default();
+        if rows.is_empty() {
+            continue;
+        }
+        if let Ok(own) = Progress::open(&dir.join(".courseshelf")) {
+            let have = own.all(&course).unwrap_or_default();
+            let newer: Vec<_> = rows.into_iter().filter(|(k, p)| have.get(k).is_none_or(|h| p.last_watched > h.last_watched)).collect();
+            if !newer.is_empty() {
+                n += own.import(&course, &newer, None).unwrap_or(0);
+            }
+        }
+    }
+    n
+}
+
 pub fn start_background(home: PathBuf, port: u16, ui_dir: Option<PathBuf>) -> Result<Running> {
     let token = courseshelf_core::random_hex(16)?;
+    {
+        let home = home.clone();
+        std::thread::spawn(move || merge_alias_progress(&home));
+    }
     let (tx, rx) = std::sync::mpsc::channel::<Result<u16>>();
     let tok = token.clone();
     std::thread::spawn(move || {
@@ -1154,6 +1184,12 @@ mod tests {
         assert_eq!(c.drive, "local");
         assert!(c.copies[0].is_mac);
         assert_eq!(c.lectures[0].position, 886.0);
+
+        // the old record is copied once into the course's own database (and the drive's copy is kept)
+        assert_eq!(merge_alias_progress(&home), 1);
+        let own = Progress::open(&dir.join(".courseshelf")).unwrap();
+        assert_eq!(own.all("Provider/Course").unwrap().get("001 - Lecture 1").map(|p| p.position), Some(886.0));
+        assert_eq!(merge_alias_progress(&home), 0, "a second run changes nothing");
         let _ = std::fs::remove_dir_all(&base);
     }
 }
